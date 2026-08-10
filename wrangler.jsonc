@@ -1,0 +1,20 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "pitti-watcher",
+  "main": "src/index.js",
+  "compatibility_date": "2026-08-10",
+  "triggers": {
+    "crons": ["*/15 * * * *", "17 4 * * *"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "pitti-watcher",
+      "database_id": "266add95-b717-48b7-9028-2aa8c30e9d52"
+    }
+  ],
+  "vars": {
+    "SLEEPER_BASE": "https://api.sleeper.app/v1",
+    "TREND_LIMIT": "200"
+  }
+}
