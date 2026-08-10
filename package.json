@@ -1,0 +1,19 @@
+{
+  "name": "pitti-watcher",
+  "version": "0.1.2",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --test-scheduled",
+    "deploy": "wrangler deploy",
+    "db:init:local": "wrangler d1 migrations apply pitti_watcher --local",
+    "db:init:remote": "wrangler d1 migrations apply pitti_watcher --remote",
+    "test:syntax": "node --check src/index.js",
+    "test": "node --test test/core.test.js",
+    "whoami": "wrangler whoami",
+    "db:list": "wrangler d1 list"
+  },
+  "devDependencies": {
+    "wrangler": "^4.28.1"
+  }
+}
