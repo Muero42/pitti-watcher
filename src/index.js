@@ -176,37 +176,133 @@ function stateHash(s) {
 
 async function runPlayerState(env, at) {
   const runId = await startRun(env, 'player_state', at);
+
   try {
     const players = await api(env, '/players/nfl');
-    let changed = 0, seen = 0;
-    for (const [id,p] of Object.entries(players || {})) {
+
+    // Bestehenden Zustand einmal gesammelt laden:
+    // kein SELECT mehr pro Spieler.
+    const existingResult = await env.DB
+      .prepare('SELECT * FROM player_state')
+      .all();
+
+    const existing = new Map(
+      (existingResult.results || []).map(row => [String(row.player_id), row])
+    );
+
+    let changed = 0;
+    let seen = 0;
+    const writes = [];
+
+    for (const [id, p] of Object.entries(players || {})) {
       if (!p || !p.position) continue;
       seen++;
-      const s = playerStateOf(p), hash = stateHash(s);
-      const old = await env.DB.prepare(`SELECT * FROM player_state WHERE player_id=?1`).bind(id).first();
+
+      const s = playerStateOf(p);
+      const hash = stateHash(s);
+      const old = existing.get(String(id));
+
       if (!old) {
-        await env.DB.prepare(`INSERT INTO player_state(player_id,full_name,team,position,injury_status,practice_participation,depth_chart_order,status,first_seen_at,last_seen_at,state_hash) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)`)
-          .bind(id,s.full_name,s.team,s.position,s.injury_status,s.practice_participation,s.depth_chart_order,s.status,at,at,hash).run();
+        writes.push(
+          env.DB.prepare(
+            `INSERT INTO player_state(
+              player_id,full_name,team,position,injury_status,
+              practice_participation,depth_chart_order,status,
+              first_seen_at,last_seen_at,state_hash
+            ) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)`
+          ).bind(
+            id,
+            s.full_name,
+            s.team,
+            s.position,
+            s.injury_status,
+            s.practice_participation,
+            s.depth_chart_order,
+            s.status,
+            at,
+            at,
+            hash
+          )
+        );
         continue;
       }
+
       if (old.state_hash === hash) {
-        await env.DB.prepare(`UPDATE player_state SET last_seen_at=?1 WHERE player_id=?2`).bind(at,id).run();
+        writes.push(
+          env.DB.prepare(
+            'UPDATE player_state SET last_seen_at=?1 WHERE player_id=?2'
+          ).bind(at, id)
+        );
         continue;
       }
+
       changed++;
       const diffs = {};
-      for (const k of ['team','position','injury_status','practice_participation','depth_chart_order','status']) {
-        const before = old[k] ?? null, after = s[k] ?? null;
-        if (String(before) !== String(after)) diffs[k] = { before, after };
+
+      for (const k of [
+        'team',
+        'position',
+        'injury_status',
+        'practice_participation',
+        'depth_chart_order',
+        'status'
+      ]) {
+        const before = old[k] ?? null;
+        const after = s[k] ?? null;
+
+        if (String(before) !== String(after)) {
+          diffs[k] = { before, after };
+        }
       }
-      await env.DB.prepare(`UPDATE player_state SET full_name=?1,team=?2,position=?3,injury_status=?4,practice_participation=?5,depth_chart_order=?6,status=?7,last_seen_at=?8,state_hash=?9 WHERE player_id=?10`)
-        .bind(s.full_name,s.team,s.position,s.injury_status,s.practice_participation,s.depth_chart_order,s.status,at,hash,id).run();
+
+      writes.push(
+        env.DB.prepare(
+          `UPDATE player_state
+           SET full_name=?1,team=?2,position=?3,injury_status=?4,
+               practice_participation=?5,depth_chart_order=?6,status=?7,
+               last_seen_at=?8,state_hash=?9
+           WHERE player_id=?10`
+        ).bind(
+          s.full_name,
+          s.team,
+          s.position,
+          s.injury_status,
+          s.practice_participation,
+          s.depth_chart_order,
+          s.status,
+          at,
+          hash,
+          id
+        )
+      );
+
       await upsertEvidence(env, {
-        player_id: id, event_type: 'PLAYER_STATE_CHANGED', fundamental_or_market: 'fundamental', occurred_at: at,
-        first_seen_at: at, last_seen_at: at, source: 'Sleeper Player Data', original_source: 'Sleeper Player Data', authority: 0.75, confidence: 0.8,
-        thesis_link: inferThesisLink(diffs), payload: { player: s.full_name, team: s.team, position: s.position, diffs }
+        player_id: id,
+        event_type: 'PLAYER_STATE_CHANGED',
+        fundamental_or_market: 'fundamental',
+        occurred_at: at,
+        first_seen_at: at,
+        last_seen_at: at,
+        source: 'Sleeper Player Data',
+        original_source: 'Sleeper Player Data',
+        authority: 0.75,
+        confidence: 0.8,
+        thesis_link: inferThesisLink(diffs),
+        payload: {
+          player: s.full_name,
+          team: s.team,
+          position: s.position,
+          diffs
+        }
       });
     }
+
+    // Schreiboperationen gebündelt an D1 schicken.
+    const BATCH_SIZE = 75;
+    for (let i = 0; i < writes.length; i += BATCH_SIZE) {
+      await env.DB.batch(writes.slice(i, i + BATCH_SIZE));
+    }
+
     await finishRun(env, runId, true, seen);
     return { ok: true, captured_at: at, seen, changed };
   } catch (e) {
