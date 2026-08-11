@@ -4,7 +4,7 @@ const DAY = 24 * HOUR;
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    if (url.pathname === '/health') return json({ ok: true, service: 'pitti-watcher', version: '0.1.2', at: Date.now() });
+    if (url.pathname === '/health') return json({ ok: true, service: 'pitti-watcher', version: '0.1.3', at: Date.now() });
     const auth = requireWatcherToken(request, env);
     if (auth) return auth;
     if (url.pathname === '/events') {
@@ -74,7 +74,7 @@ function clampInt(v, min, max, fallback) {
 
 async function api(env, path) {
   const base = env.SLEEPER_BASE || 'https://api.sleeper.app/v1';
-  const r = await fetch(base + path, { headers: { 'user-agent': 'PittiWatcher/0.1.2' } });
+  const r = await fetch(base + path, { headers: { 'user-agent': 'PittiWatcher/0.1.3' } });
   if (!r.ok) throw new Error(`Sleeper ${path}: HTTP ${r.status}`);
   return r.json();
 }
@@ -119,11 +119,32 @@ async function runTrending(env, at) {
 }
 
 async function detectMarketEvents(env, at) {
-  const current = await env.DB.prepare(`SELECT * FROM trending_snapshots WHERE captured_at=?1`).bind(at).all();
-  for (const row of current.results || []) {
-    const prev = await env.DB.prepare(`SELECT * FROM trending_snapshots WHERE player_id=?1 AND captured_at<?2 ORDER BY captured_at DESC LIMIT 1`).bind(row.player_id, at).first();
+  const [currentResult, previousResult] = await Promise.all([
+    env.DB.prepare(`SELECT * FROM trending_snapshots WHERE captured_at=?1`).bind(at).all(),
+    env.DB.prepare(`
+      SELECT t.*
+      FROM trending_snapshots t
+      INNER JOIN (
+        SELECT player_id, MAX(captured_at) AS captured_at
+        FROM trending_snapshots
+        WHERE captured_at < ?1
+        GROUP BY player_id
+      ) p
+        ON p.player_id=t.player_id
+       AND p.captured_at=t.captured_at
+    `).bind(at).all()
+  ]);
+
+  const previous = new Map(
+    (previousResult.results || []).map(row => [String(row.player_id), row])
+  );
+
+  for (const row of currentResult.results || []) {
+    const prev = previous.get(String(row.player_id));
     if (!prev) continue;
+
     const { addNow, addPrev, dropNow, dropPrev, accel, reversal, marketAcceleration, marketReversal } = marketSignals(row, prev);
+
     if (marketAcceleration) {
       await upsertEvidence(env, {
         player_id: row.player_id, event_type: 'MARKET_ACCELERATION', fundamental_or_market: 'market', occurred_at: at,
@@ -131,6 +152,7 @@ async function detectMarketEvents(env, at) {
         thesis_link: 'market_recognition', payload: { adds_1h: addNow, previous_adds_1h: addPrev, acceleration: accel, adds_3h: row.adds_3h, adds_24h: row.adds_24h }
       });
     }
+
     if (marketReversal) {
       await upsertEvidence(env, {
         player_id: row.player_id, event_type: 'MARKET_REVERSAL', fundamental_or_market: 'market', occurred_at: at,
