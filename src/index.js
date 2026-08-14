@@ -1,10 +1,11 @@
 const HOUR = 3600_000;
 const DAY = 24 * HOUR;
+const VERSION = '0.1.4';
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    if (url.pathname === '/health') return json({ ok: true, service: 'pitti-watcher', version: '0.1.3', at: Date.now() });
+    if (url.pathname === '/health') return json({ ok: true, service: 'pitti-watcher', version: VERSION, at: Date.now() });
     const auth = requireWatcherToken(request, env);
     if (auth) return auth;
     if (url.pathname === '/events') {
@@ -13,8 +14,31 @@ export default {
       return json(rows.results || []);
     }
     if (url.pathname === '/runs') {
-      const rows = await env.DB.prepare(`SELECT * FROM watcher_runs ORDER BY started_at DESC LIMIT 30`).all();
+      const limit = clampInt(url.searchParams.get('limit'), 1, 500, 30);
+      const type = normalizeRunType(url.searchParams.get('type'));
+      const source = normalizeRunSource(url.searchParams.get('source'));
+      const { sql, binds } = runsQuery({ type, source, limit });
+      let stmt = env.DB.prepare(sql);
+      if (binds.length) stmt = stmt.bind(...binds);
+      const rows = await stmt.all();
       return json(rows.results || []);
+    }
+    if (url.pathname === '/run-health') {
+      const rows = await env.DB.prepare(`
+        SELECT * FROM watcher_runs
+        WHERE run_type IN ('trending:scheduled','player_state:scheduled')
+        ORDER BY started_at DESC
+        LIMIT 40`).all();
+      const list = rows.results || [];
+      return json({
+        ok: true,
+        version: VERSION,
+        latest: {
+          trending: list.find(x => x.run_type === 'trending:scheduled') || null,
+          player_state: list.find(x => x.run_type === 'player_state:scheduled') || null
+        },
+        recentScheduledRuns: list
+      });
     }
     if (url.pathname === '/market') {
       const rows = await env.DB.prepare(`
@@ -29,24 +53,24 @@ export default {
       return json(rows.results || []);
     }
     if (url.pathname === '/debug/run-trending') {
-      const out = await runTrending(env, Date.now());
+      const out = await runTrending(env, Date.now(), 'debug');
       return json(out);
     }
     if (url.pathname === '/debug/run-players') {
-      const out = await runPlayerState(env, Date.now());
+      const out = await runPlayerState(env, Date.now(), 'debug');
       return json(out);
     }
-    return json({ ok: true, endpoints: ['/health','/events','/runs','/market','/debug/run-trending','/debug/run-players'] });
+    return json({ ok: true, endpoints: ['/health','/events','/runs','/run-health','/market','/debug/run-trending','/debug/run-players'] });
   },
 
   async scheduled(controller, env, ctx) {
     const cron = controller.cron || '';
     const at = Date.now();
     if (cron === '17 4 * * *') {
-      ctx.waitUntil(runPlayerState(env, at));
+      ctx.waitUntil(runPlayerState(env, at, 'scheduled'));
       return;
     }
-    ctx.waitUntil(runTrending(env, at));
+    ctx.waitUntil(runTrending(env, at, 'scheduled'));
   }
 };
 
@@ -66,6 +90,48 @@ function json(data, status = 200) {
   });
 }
 
+
+function normalizeRunType(v) {
+  const x = String(v || '').trim();
+  return x === 'trending' || x === 'player_state' ? x : null;
+}
+
+function normalizeRunSource(v) {
+  const x = String(v || '').trim();
+  return x === 'scheduled' || x === 'debug' || x === 'legacy' ? x : null;
+}
+
+function runsQuery({ type = null, source = null, limit = 30 } = {}) {
+  const where = [];
+  const binds = [];
+  if (type && source === 'scheduled') {
+    binds.push(`${type}:scheduled`);
+    where.push(`run_type=?${binds.length}`);
+  } else if (type && source === 'debug') {
+    binds.push(`${type}:debug`);
+    where.push(`run_type=?${binds.length}`);
+  } else if (type && source === 'legacy') {
+    binds.push(type);
+    where.push(`run_type=?${binds.length}`);
+  } else if (type) {
+    binds.push(type, `${type}:scheduled`, `${type}:debug`);
+    const a = binds.length - 2, b = binds.length - 1, c = binds.length;
+    where.push(`run_type IN (?${a},?${b},?${c})`);
+  } else if (source === 'scheduled') {
+    where.push(`run_type LIKE '%:scheduled'`);
+  } else if (source === 'debug') {
+    where.push(`run_type LIKE '%:debug'`);
+  } else if (source === 'legacy') {
+    where.push(`run_type IN ('trending','player_state')`);
+  }
+  binds.push(clampInt(limit, 1, 500, 30));
+  const limitParam = binds.length;
+  return {
+    sql: `SELECT * FROM watcher_runs${where.length ? ' WHERE ' + where.join(' AND ') : ''} ORDER BY started_at DESC LIMIT ?${limitParam}`,
+    binds
+  };
+}
+
 function clampInt(v, min, max, fallback) {
   const n = Number(v);
   if (!Number.isFinite(n)) return fallback;
@@ -74,13 +140,14 @@ function clampInt(v, min, max, fallback) {
 
 async function api(env, path) {
   const base = env.SLEEPER_BASE || 'https://api.sleeper.app/v1';
-  const r = await fetch(base + path, { headers: { 'user-agent': 'PittiWatcher/0.1.3' } });
+  const r = await fetch(base + path, { headers: { 'user-agent': `PittiWatcher/${VERSION}` } });
   if (!r.ok) throw new Error(`Sleeper ${path}: HTTP ${r.status}`);
   return r.json();
 }
 
-async function startRun(env, type, at) {
-  const x = await env.DB.prepare(`INSERT INTO watcher_runs(run_type,started_at) VALUES(?1,?2) RETURNING id`).bind(type, at).first();
+async function startRun(env, type, at, source = 'internal') {
+  const storedType = source === 'scheduled' || source === 'debug' ? `${type}:${source}` : type;
+  const x = await env.DB.prepare(`INSERT INTO watcher_runs(run_type,started_at) VALUES(?1,?2) RETURNING id`).bind(storedType, at).first();
   return x?.id;
 }
 
@@ -96,8 +163,8 @@ async function trendingWindow(env, type, hours, limit) {
   return map;
 }
 
-async function runTrending(env, at) {
-  const runId = await startRun(env, 'trending', at);
+async function runTrending(env, at, source = 'internal') {
+  const runId = await startRun(env, 'trending', at, source);
   try {
     const limit = clampInt(env.TREND_LIMIT, 20, 1000, 200);
     const [a1,a3,a6,a24,d1,d6,d24] = await Promise.all([
@@ -196,8 +263,8 @@ function stateHash(s) {
   return JSON.stringify(trackedState(s));
 }
 
-async function runPlayerState(env, at) {
-  const runId = await startRun(env, 'player_state', at);
+async function runPlayerState(env, at, source = 'internal') {
+  const runId = await startRun(env, 'player_state', at, source);
 
   try {
     const players = await api(env, '/players/nfl');
@@ -365,4 +432,4 @@ async function evidenceFingerprint(e) {
   return sha256(JSON.stringify(identity));
 }
 
-export { playerStateOf, trackedState, stateHash, inferThesisLink, marketSignals, evidenceFingerprint, depthChartOrderOf };
+export { playerStateOf, trackedState, stateHash, inferThesisLink, marketSignals, evidenceFingerprint, depthChartOrderOf, normalizeRunType, normalizeRunSource, runsQuery };
