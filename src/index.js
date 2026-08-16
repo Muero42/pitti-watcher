@@ -1,11 +1,12 @@
 const HOUR = 3600_000;
 const DAY = 24 * HOUR;
-const VERSION = '0.1.4';
+const VERSION = '0.1.5';
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (url.pathname === '/health') return json({ ok: true, service: 'pitti-watcher', version: VERSION, at: Date.now() });
+    if (url.pathname === '/companion-feed') return companionFeed(env);
     const auth = requireWatcherToken(request, env);
     if (auth) return auth;
     if (url.pathname === '/events') {
@@ -73,6 +74,58 @@ export default {
     ctx.waitUntil(runTrending(env, at, 'scheduled'));
   }
 };
+
+async function companionFeed(env) {
+  const healthRows = await env.DB.prepare(`
+    SELECT run_type,started_at,finished_at,ok,item_count
+    FROM watcher_runs
+    WHERE run_type IN ('trending:scheduled','player_state:scheduled')
+    ORDER BY started_at DESC
+    LIMIT 40`).all();
+  const scheduled = healthRows.results || [];
+  const trending = scheduled.find(x => x.run_type === 'trending:scheduled') || null;
+  const playerState = scheduled.find(x => x.run_type === 'player_state:scheduled') || null;
+  const now = Date.now();
+  const runPass = (x,maxAgeMs) => !!(x && Number(x.ok) === 1 && x.finished_at != null && Number.isFinite(Number(x.started_at)) && now-Number(x.started_at) >= 0 && now-Number(x.started_at) <= maxAgeMs);
+  const explicitFail = [trending,playerState].some(x => x && (Number(x.ok) !== 1 || x.finished_at == null));
+  const gate = runPass(trending,45*60_000) && runPass(playerState,36*HOUR) ? 'PASS' :
+    (explicitFail ? 'FAIL' : (trending && playerState ? 'STALE' : 'WAIT_FOR_SCHEDULED_EVIDENCE'));
+
+  let events = [], market = [];
+  if (gate === 'PASS') {
+    const [eventRows, marketRows] = await Promise.all([
+      env.DB.prepare(`SELECT id,player_id,event_type,fundamental_or_market,occurred_at,first_seen_at,last_seen_at,source,original_source,authority,confidence,thesis_link,payload_json
+        FROM evidence_events ORDER BY first_seen_at DESC LIMIT 250`).all(),
+      env.DB.prepare(`
+        WITH latest AS (SELECT MAX(captured_at) t FROM trending_snapshots)
+        SELECT t.captured_at,t.player_id,t.adds_1h,t.adds_3h,t.adds_6h,t.adds_24h,t.drops_1h,t.drops_6h,t.drops_24h,
+               COALESCE(p.full_name,t.player_id) full_name,p.team,p.position
+        FROM trending_snapshots t LEFT JOIN player_state p ON p.player_id=t.player_id
+        WHERE t.captured_at=(SELECT t FROM latest)
+        ORDER BY COALESCE(t.adds_1h,0) DESC, COALESCE(t.adds_3h,0) DESC LIMIT 50`).all()
+    ]);
+    events = eventRows.results || [];
+    market = marketRows.results || [];
+  }
+  return jsonCors({
+    schema:'draft-companion.watcher-feed.v1',
+    generatedAt:Date.now(),
+    watcherVersion:VERSION,
+    gate:{overall:gate,trending:publicRun(trending),player_state:publicRun(playerState)},
+    events,market
+  });
+}
+
+function publicRun(x){
+  if(!x)return null;
+  return {started_at:x.started_at,finished_at:x.finished_at,ok:Number(x.ok)===1,item_count:Number(x.item_count||0)};
+}
+
+function jsonCors(data,status=200){
+  return new Response(JSON.stringify(data,null,2),{status,headers:{
+    'content-type':'application/json; charset=utf-8','cache-control':'no-store','access-control-allow-origin':'*'
+  }});
+}
 
 function requireWatcherToken(request, env) {
   const expected = String(env.WATCHER_TOKEN || '').trim();
