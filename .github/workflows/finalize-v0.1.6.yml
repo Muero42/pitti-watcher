@@ -1,0 +1,60 @@
+name: finalize-watcher-v0.1.6
+on:
+  workflow_dispatch:
+  push:
+    branches: [pitti-auto/watcher-v0.1.6-freshness]
+    paths:
+      - tools/apply-freshness-runtime.mjs
+      - tests/freshness-contract.test.mjs
+      - .github/workflows/finalize-v0.1.6.yml
+permissions:
+  contents: write
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: pitti-auto/watcher-v0.1.6-freshness
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Restore deployed v0.1.5 runtime baseline
+        run: git checkout 86e39038dfbb1bc240eed4a1972f80dec9b94175 -- src/index.js wrangler.jsonc package.json
+      - name: Validate patcher
+        run: node --check tools/apply-freshness-runtime.mjs
+      - name: Apply deterministic freshness patch
+        run: node tools/apply-freshness-runtime.mjs
+      - name: Runtime and freshness gates
+        run: |
+          node --check src/index.js
+          node tests/freshness-contract.test.mjs
+          node --test test/core.test.js
+      - name: Commit tested runtime candidate
+        run: |
+          git config user.name 'pitti-auto'
+          git config user.email 'actions@users.noreply.github.com'
+          git add src/index.js wrangler.jsonc package.json
+          if git diff --cached --quiet; then
+            echo 'Watcher runtime already matches tested v0.1.6 candidate.'
+          else
+            git commit -m 'Integrate watcher v0.1.6 freshness runtime'
+            git push
+          fi
+      - name: Persist successful candidate provenance
+        run: |
+          RUNTIME_SHA=$(git rev-parse HEAD)
+          printf '{\n  "status": "PASS",\n  "run_id": %s,\n  "trigger_sha": "%s",\n  "runtime_commit": "%s",\n  "deployed": false\n}\n' "$GITHUB_RUN_ID" "$GITHUB_SHA" "$RUNTIME_SHA" > tests/last-v0.1.6-success.json
+          git add tests/last-v0.1.6-success.json
+          git commit -m 'ci: seal watcher v0.1.6 candidate provenance'
+          git push
+      - name: Persist fail-closed diagnostic
+        if: failure()
+        run: |
+          printf 'status=FAIL\nhead=%s\nrun=%s\n' "$GITHUB_SHA" "$GITHUB_RUN_ID" > tests/last-v0.1.6-error.txt
+          git config user.name 'pitti-auto'
+          git config user.email 'actions@users.noreply.github.com'
+          git add tests/last-v0.1.6-error.txt
+          git commit -m 'ci: persist watcher v0.1.6 failure' || exit 0
+          git push
