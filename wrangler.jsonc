@@ -4,7 +4,7 @@
   "main": "src/index.js",
   "compatibility_date": "2026-08-10",
   "triggers": {
-    "crons": ["*/15 * * * *", "17 4 * * *"]
+    "crons": ["*/15 * * * *", "17 */6 * * *"]
   },
   "d1_databases": [
     {

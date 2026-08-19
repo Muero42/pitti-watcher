@@ -1,6 +1,6 @@
 const HOUR = 3600_000;
 const DAY = 24 * HOUR;
-const VERSION = '0.1.5';
+const VERSION = '0.1.6';
 
 export default {
   async fetch(request, env) {
@@ -67,7 +67,7 @@ export default {
   async scheduled(controller, env, ctx) {
     const cron = controller.cron || '';
     const at = Date.now();
-    if (cron === '17 4 * * *') {
+    if (cron === '17 */6 * * *') {
       ctx.waitUntil(runPlayerState(env, at, 'scheduled'));
       return;
     }
@@ -88,7 +88,7 @@ async function companionFeed(env) {
   const now = Date.now();
   const runPass = (x,maxAgeMs) => !!(x && Number(x.ok) === 1 && x.finished_at != null && Number.isFinite(Number(x.started_at)) && now-Number(x.started_at) >= 0 && now-Number(x.started_at) <= maxAgeMs);
   const explicitFail = [trending,playerState].some(x => x && (Number(x.ok) !== 1 || x.finished_at == null));
-  const gate = runPass(trending,45*60_000) && runPass(playerState,36*HOUR) ? 'PASS' :
+  const gate = runPass(trending,45*60_000) && runPass(playerState,8*HOUR) ? 'PASS' :
     (explicitFail ? 'FAIL' : (trending && playerState ? 'STALE' : 'WAIT_FOR_SCHEDULED_EVIDENCE'));
 
   let events = [], market = [];
