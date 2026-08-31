@@ -1,12 +1,18 @@
 const HOUR = 3600_000;
 const DAY = 24 * HOUR;
-const VERSION = '0.1.5';
+const VERSION = '0.2.0';
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (url.pathname === '/health') return json({ ok: true, service: 'pitti-watcher', version: VERSION, at: Date.now() });
     if (url.pathname === '/companion-feed') return companionFeed(env);
+    if (url.pathname === '/league-state') {
+      const leagueId = String(url.searchParams.get('league_id') || env.LEAGUE_ID || '').trim();
+      const userId = String(url.searchParams.get('user_id') || env.SLEEPER_USER_ID || '').trim();
+      if (!leagueId) return jsonCors({ ok:false, error:'league_id is required' },400);
+      return jsonCors(await leagueState(env, leagueId, userId));
+    }
     const auth = requireWatcherToken(request, env);
     if (auth) return auth;
     if (url.pathname === '/events') {
@@ -74,6 +80,27 @@ export default {
     ctx.waitUntil(runTrending(env, at, 'scheduled'));
   }
 };
+
+async function leagueState(env, leagueId, userId = '') {
+  const [rosters, users, week0, week1] = await Promise.all([
+    api(env, `/league/${leagueId}/rosters`),
+    api(env, `/league/${leagueId}/users`),
+    api(env, `/league/${leagueId}/transactions/0`).catch(()=>[]),
+    api(env, `/league/${leagueId}/transactions/1`).catch(()=>[])
+  ]);
+  const ownerByRoster = new Map((rosters||[]).map(r=>[String(r.roster_id),String(r.owner_id||'')]));
+  const myRoster = (rosters||[]).find(r=>userId && String(r.owner_id)===userId) || null;
+  const owned = {};
+  for (const r of rosters||[]) for (const pid of [...(r.players||[]),...(r.reserve||[])]) {
+    if (pid) owned[String(pid)] = { roster_id:r.roster_id, owner_id:r.owner_id, mine:!!(myRoster && r.roster_id===myRoster.roster_id) };
+  }
+  return {
+    ok:true, league_id:leagueId, user_id:userId||null, generated_at:Date.now(),
+    my_roster:myRoster, rosters, users,
+    ownership:owned,
+    transactions:[...(week0||[]),...(week1||[])].sort((a,b)=>Number(b.created||0)-Number(a.created||0))
+  };
+}
 
 async function companionFeed(env) {
   const healthRows = await env.DB.prepare(`
