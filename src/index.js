@@ -97,6 +97,9 @@ async function leagueState(env, leagueId, userId = '') {
   return {
     ok:true, league_id:leagueId, user_id:userId||null, generated_at:Date.now(),
     my_roster:myRoster, rosters, users,
+    // Sleeper roster payload includes starters in league lineup-slot order.
+    my_starters:myRoster?.starters||[],
+    my_players:myRoster?.players||[],
     ownership:owned,
     transactions:[...(week0||[]),...(week1||[])].sort((a,b)=>Number(b.created||0)-Number(a.created||0))
   };
