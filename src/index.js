@@ -1,6 +1,6 @@
 const HOUR = 3600_000;
 const DAY = 24 * HOUR;
-const VERSION = '0.2.1';
+const VERSION = '0.2.2';
 
 export default {
   async fetch(request, env) {
@@ -8,11 +8,13 @@ export default {
     if (url.pathname === '/health') return json({ ok: true, service: 'pitti-watcher', version: VERSION, at: Date.now() });
     if (url.pathname === '/companion-feed') return companionFeed(env);
     if (url.pathname === '/league-state') {
-      const leagueId = String(url.searchParams.get('league_id') || env.LEAGUE_ID || '').trim();
-      const userId = String(url.searchParams.get('user_id') || env.SLEEPER_USER_ID || '').trim();
-      const rosterId = String(url.searchParams.get('roster_id') || env.MY_ROSTER_ID || '').trim();
-      if (!leagueId) return jsonCors({ ok:false, error:'league_id is required' },400);
-      return jsonCors(await leagueState(env, leagueId, userId, rosterId));
+      const context = await resolveLeagueContext(env, {
+        leagueId:String(url.searchParams.get('league_id') || '').trim(),
+        userId:String(url.searchParams.get('user_id') || '').trim(),
+        rosterId:String(url.searchParams.get('roster_id') || '').trim()
+      });
+      if (!context.leagueId) return jsonCors({ ok:false, error:'league_id could not be resolved' },400);
+      return jsonCors(await leagueState(env, context.leagueId, context.userId, context.rosterId));
     }
     const auth = requireWatcherToken(request, env);
     if (auth) return auth;
@@ -81,6 +83,29 @@ export default {
     ctx.waitUntil(runTrending(env, at, 'scheduled'));
   }
 };
+
+async function resolveLeagueContext(env, override = {}) {
+  let leagueId=String(override.leagueId || env.LEAGUE_ID || '').trim();
+  let userId=String(override.userId || env.SLEEPER_USER_ID || '').trim();
+  let rosterId=String(override.rosterId || env.MY_ROSTER_ID || '').trim();
+  const draftId=String(env.DRAFT_ID || '').trim();
+  const mySlot=Number(env.MY_DRAFT_SLOT || 0);
+  if ((!leagueId || !rosterId || !userId) && draftId) {
+    try {
+      const draft=await api(env,`/draft/${draftId}`);
+      leagueId=leagueId || String(draft?.league_id || '').trim();
+      if (!rosterId && mySlot>0) {
+        const mapped=draft?.slot_to_roster_id?.[String(mySlot)] ?? draft?.slot_to_roster_id?.[mySlot];
+        if (mapped!==undefined && mapped!==null) rosterId=String(mapped);
+      }
+      if (!userId && mySlot>0 && draft?.draft_order) {
+        const pair=Object.entries(draft.draft_order).find(([,slot])=>Number(slot)===mySlot);
+        if(pair) userId=String(pair[0]);
+      }
+    } catch (_) {}
+  }
+  return {leagueId,userId,rosterId,draftId:draftId||null,mySlot:mySlot||null};
+}
 
 async function leagueState(env, leagueId, userId = '', rosterId = '') {
   const [rosters, users, nflState] = await Promise.all([
@@ -204,12 +229,13 @@ async function companionFeed(env) {
     ]);
     events = eventRows.results || [];
     market = marketRows.results || [];
-    const leagueId=String(env.LEAGUE_ID||'').trim();
-    if(leagueId) {
+    const context=await resolveLeagueContext(env);
+    if(context.leagueId) {
       try {
-        league=await leagueState(env,leagueId,String(env.SLEEPER_USER_ID||'').trim(),String(env.MY_ROSTER_ID||'').trim());
+        league=await leagueState(env,context.leagueId,context.userId,context.rosterId);
+        league.context={draft_id:context.draftId,my_slot:context.mySlot};
       } catch(e) {
-        league={ok:false,error:String(e?.message||e),league_id:leagueId};
+        league={ok:false,error:String(e?.message||e),league_id:context.leagueId,context};
       }
     }
   }
@@ -594,4 +620,4 @@ async function evidenceFingerprint(e) {
   return sha256(JSON.stringify(identity));
 }
 
-export { playerStateOf, trackedState, stateHash, inferThesisLink, marketSignals, evidenceFingerprint, depthChartOrderOf, normalizeRunType, normalizeRunSource, runsQuery, ownershipStatus, buildFreeAgencyRadar };
+export { playerStateOf, trackedState, stateHash, inferThesisLink, marketSignals, evidenceFingerprint, depthChartOrderOf, normalizeRunType, normalizeRunSource, runsQuery, ownershipStatus, buildFreeAgencyRadar, resolveLeagueContext };
