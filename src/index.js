@@ -1,6 +1,6 @@
 const HOUR = 3600_000;
 const DAY = 24 * HOUR;
-const VERSION = '0.2.2';
+const VERSION = '0.2.3';
 
 export default {
   async fetch(request, env) {
@@ -373,21 +373,25 @@ async function runTrending(env, at, source = 'internal') {
   }
 }
 
+function previousTrendingSnapshotSql() {
+  // All rows from one polling run share captured_at. Select exactly the immediately
+  // preceding snapshot instead of grouping the entire historical table by player_id.
+  // The old GROUP BY path made rows_read grow with total history on every 15-minute run.
+  return `
+    SELECT *
+    FROM trending_snapshots
+    WHERE captured_at=(
+      SELECT MAX(captured_at)
+      FROM trending_snapshots
+      WHERE captured_at < ?1
+    )
+  `;
+}
+
 async function detectMarketEvents(env, at) {
   const [currentResult, previousResult] = await Promise.all([
     env.DB.prepare(`SELECT * FROM trending_snapshots WHERE captured_at=?1`).bind(at).all(),
-    env.DB.prepare(`
-      SELECT t.*
-      FROM trending_snapshots t
-      INNER JOIN (
-        SELECT player_id, MAX(captured_at) AS captured_at
-        FROM trending_snapshots
-        WHERE captured_at < ?1
-        GROUP BY player_id
-      ) p
-        ON p.player_id=t.player_id
-       AND p.captured_at=t.captured_at
-    `).bind(at).all()
+    env.DB.prepare(previousTrendingSnapshotSql()).bind(at).all()
   ]);
 
   const previous = new Map(
@@ -620,4 +624,4 @@ async function evidenceFingerprint(e) {
   return sha256(JSON.stringify(identity));
 }
 
-export { playerStateOf, trackedState, stateHash, inferThesisLink, marketSignals, evidenceFingerprint, depthChartOrderOf, normalizeRunType, normalizeRunSource, runsQuery, ownershipStatus, buildFreeAgencyRadar, resolveLeagueContext };
+export { playerStateOf, trackedState, stateHash, inferThesisLink, marketSignals, evidenceFingerprint, depthChartOrderOf, normalizeRunType, normalizeRunSource, runsQuery, ownershipStatus, buildFreeAgencyRadar, resolveLeagueContext, previousTrendingSnapshotSql };

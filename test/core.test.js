@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ownershipStatus, buildFreeAgencyRadar, marketSignals } from '../src/index.js';
+import { ownershipStatus, buildFreeAgencyRadar, marketSignals, previousTrendingSnapshotSql } from '../src/index.js';
 
 test('ownershipStatus distinguishes mine, opponent, and free agent', () => {
   const league={ownership:{
@@ -38,4 +38,12 @@ test('marketSignals preserves watcher alert thresholds', () => {
   const b=marketSignals({adds_1h:24,drops_1h:19},{adds_1h:0,drops_1h:0});
   assert.equal(b.marketAcceleration,false);
   assert.equal(b.marketReversal,false);
+});
+
+
+test('previous trending snapshot query is bounded to one capture instead of scanning history per player', () => {
+  const sql=previousTrendingSnapshotSql().replace(/\s+/g,' ').trim();
+  assert.match(sql,/WHERE captured_at=\( SELECT MAX\(captured_at\)/);
+  assert.doesNotMatch(sql,/GROUP BY/i);
+  assert.doesNotMatch(sql,/JOIN/i);
 });

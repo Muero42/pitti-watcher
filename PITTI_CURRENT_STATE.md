@@ -1,7 +1,7 @@
 # PITTI CURRENT STATE
 
 Updated: 2026-09-01
-Watcher version: v0.2.2
+Watcher version: v0.2.3
 Mode: POST_DRAFT / PRE_WEEK_1
 
 ## Source of truth
@@ -61,9 +61,17 @@ Draft-only return probability, ADP-return logic and opponent pick prediction are
 
 `AUTO` / `AUTO BLOCK` means autonomous execution with no unnecessary status chatter, no empty messages, and no false “AUTO continues” messages that themselves stop execution. Continue until a real blocker, user action, material external commitment, or validated end state is reached.
 
+## Cloudflare D1 rows_read correction
+
+- The D1 database is directly bound to this watcher as `env.DB`; this corrects the earlier draft-companion-only audit that could not see the separate watcher repository.
+- Root cause candidate with direct code evidence: the 15-minute `detectMarketEvents` path previously reconstructed each player's previous sample using `GROUP BY player_id, MAX(captured_at)` over the entire growing `trending_snapshots` history. That makes D1 rows_read grow with retained history on every scheduled poll.
+- v0.2.3 replaces that historical per-player scan with one immediately preceding `captured_at` snapshot. Because every polling batch shares one timestamp, this preserves the intended comparison while bounding the previous-snapshot read to roughly one polling batch.
+- An executable regression forbids GROUP BY/JOIN in the previous-snapshot query. No paid Cloudflare upgrade is required as a code remediation.
+- D1 is already quota-blocked until the provider reset; service recovery before reset is not expected even after deployment.
+
 ## Current technical verification
 
-- v0.2.2 source parses successfully after the league-sync changes.
+- v0.2.3 source includes the bounded previous-snapshot D1 query and regression coverage.
 - Unit tests exist in `test/core.test.js` for ownership filtering, free-agent radar prioritization, and market thresholds.
 - Wrangler config now contains the completed draft ID and user draft slot so the worker can resolve the live league without hardcoding an unverified league ID.
 
