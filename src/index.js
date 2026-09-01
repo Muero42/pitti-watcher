@@ -1,6 +1,6 @@
 const HOUR = 3600_000;
 const DAY = 24 * HOUR;
-const VERSION = '0.2.0';
+const VERSION = '0.2.1';
 
 export default {
   async fetch(request, env) {
@@ -10,8 +10,9 @@ export default {
     if (url.pathname === '/league-state') {
       const leagueId = String(url.searchParams.get('league_id') || env.LEAGUE_ID || '').trim();
       const userId = String(url.searchParams.get('user_id') || env.SLEEPER_USER_ID || '').trim();
+      const rosterId = String(url.searchParams.get('roster_id') || env.MY_ROSTER_ID || '').trim();
       if (!leagueId) return jsonCors({ ok:false, error:'league_id is required' },400);
-      return jsonCors(await leagueState(env, leagueId, userId));
+      return jsonCors(await leagueState(env, leagueId, userId, rosterId));
     }
     const auth = requireWatcherToken(request, env);
     if (auth) return auth;
@@ -81,28 +82,95 @@ export default {
   }
 };
 
-async function leagueState(env, leagueId, userId = '') {
-  const [rosters, users, week0, week1] = await Promise.all([
+async function leagueState(env, leagueId, userId = '', rosterId = '') {
+  const [rosters, users, nflState] = await Promise.all([
     api(env, `/league/${leagueId}/rosters`),
     api(env, `/league/${leagueId}/users`),
-    api(env, `/league/${leagueId}/transactions/0`).catch(()=>[]),
-    api(env, `/league/${leagueId}/transactions/1`).catch(()=>[])
+    api(env, '/state/nfl').catch(()=>({}))
   ]);
-  const ownerByRoster = new Map((rosters||[]).map(r=>[String(r.roster_id),String(r.owner_id||'')]));
-  const myRoster = (rosters||[]).find(r=>userId && String(r.owner_id)===userId) || null;
+  const currentWeek = Math.max(0, Number(nflState?.week || 0));
+  const weeks = [...new Set([0, Math.max(0,currentWeek-1), currentWeek])];
+  const transactionPages = await Promise.all(
+    weeks.map(w => api(env, `/league/${leagueId}/transactions/${w}`).catch(()=>[]))
+  );
+  const myRoster = (rosters||[]).find(r =>
+    (userId && String(r.owner_id)===userId) ||
+    (rosterId && String(r.roster_id)===rosterId)
+  ) || null;
   const owned = {};
-  for (const r of rosters||[]) for (const pid of [...(r.players||[]),...(r.reserve||[])]) {
-    if (pid) owned[String(pid)] = { roster_id:r.roster_id, owner_id:r.owner_id, mine:!!(myRoster && r.roster_id===myRoster.roster_id) };
+  for (const r of rosters||[]) {
+    const ids = new Set([...(r.players||[]),...(r.reserve||[]),...(r.taxi||[])].filter(Boolean).map(String));
+    for (const pid of ids) {
+      owned[pid] = {
+        roster_id:r.roster_id,
+        owner_id:r.owner_id,
+        mine:!!(myRoster && String(r.roster_id)===String(myRoster.roster_id)),
+        reserve:(r.reserve||[]).map(String).includes(pid),
+        taxi:(r.taxi||[]).map(String).includes(pid)
+      };
+    }
   }
+  const txSeen = new Set();
+  const transactions = transactionPages.flat().filter(tx => {
+    const key=String(tx.transaction_id || tx.created || JSON.stringify(tx));
+    if(txSeen.has(key)) return false;
+    txSeen.add(key); return true;
+  }).sort((a,b)=>Number(b.created||0)-Number(a.created||0));
   return {
-    ok:true, league_id:leagueId, user_id:userId||null, generated_at:Date.now(),
+    ok:true, league_id:leagueId, user_id:userId||null, roster_id:myRoster?.roster_id||null,
+    generated_at:Date.now(), nfl_state:nflState||{}, current_week:currentWeek,
     my_roster:myRoster, rosters, users,
-    // Sleeper roster payload includes starters in league lineup-slot order.
     my_starters:myRoster?.starters||[],
     my_players:myRoster?.players||[],
+    my_reserve:myRoster?.reserve||[],
     ownership:owned,
-    transactions:[...(week0||[]),...(week1||[])].sort((a,b)=>Number(b.created||0)-Number(a.created||0))
+    transactions
   };
+}
+
+function ownershipStatus(league, playerId) {
+  const x = league?.ownership?.[String(playerId)];
+  if (!x) return 'free_agent';
+  return x.mine ? 'mine' : 'opponent';
+}
+
+function buildFreeAgencyRadar(events = [], market = [], league = null) {
+  if (!league?.ok) return { available:false, reason:'LEAGUE_STATE_UNAVAILABLE', candidates:[] };
+  const byPlayer = new Map();
+  const ensure = id => {
+    const key=String(id||'');
+    if(!key) return null;
+    if(!byPlayer.has(key)) byPlayer.set(key,{ player_id:key, events:[], market:null });
+    return byPlayer.get(key);
+  };
+  for (const m of market||[]) {
+    const x=ensure(m.player_id); if(x) x.market=m;
+  }
+  for (const e of events||[]) {
+    const x=ensure(e.player_id); if(x) x.events.push(e);
+  }
+  const candidates=[];
+  for (const x of byPlayer.values()) {
+    if (ownershipStatus(league,x.player_id)!=='free_agent') continue;
+    const fundamental=x.events.filter(e=>e.fundamental_or_market==='fundamental');
+    const marketEvents=x.events.filter(e=>e.fundamental_or_market==='market');
+    const adds1=Number(x.market?.adds_1h||0), adds3=Number(x.market?.adds_3h||0), adds24=Number(x.market?.adds_24h||0);
+    const drops1=Number(x.market?.drops_1h||0);
+    const signalScore=(fundamental.length?1000:0)+(marketEvents.length?250:0)+adds1*4+adds3+Math.min(adds24,200)-drops1*2;
+    candidates.push({
+      player_id:x.player_id,
+      full_name:x.market?.full_name || fundamental[0]?.payload_json?.player || null,
+      team:x.market?.team||null, position:x.market?.position||null,
+      availability:'free_agent',
+      fundamental_events:fundamental.length,
+      market_events:marketEvents.length,
+      adds_1h:adds1, adds_3h:adds3, adds_24h:adds24, drops_1h:drops1,
+      signal_score:signalScore,
+      evidence:x.events.slice(0,5)
+    });
+  }
+  candidates.sort((a,b)=>b.signal_score-a.signal_score || b.adds_1h-a.adds_1h);
+  return { available:true, generated_at:Date.now(), candidates:candidates.slice(0,50) };
 }
 
 async function companionFeed(env) {
@@ -121,7 +189,7 @@ async function companionFeed(env) {
   const gate = runPass(trending,45*60_000) && runPass(playerState,36*HOUR) ? 'PASS' :
     (explicitFail ? 'FAIL' : (trending && playerState ? 'STALE' : 'WAIT_FOR_SCHEDULED_EVIDENCE'));
 
-  let events = [], market = [];
+  let events = [], market = [], league = null;
   if (gate === 'PASS') {
     const [eventRows, marketRows] = await Promise.all([
       env.DB.prepare(`SELECT id,player_id,event_type,fundamental_or_market,occurred_at,first_seen_at,last_seen_at,source,original_source,authority,confidence,thesis_link,payload_json
@@ -136,13 +204,24 @@ async function companionFeed(env) {
     ]);
     events = eventRows.results || [];
     market = marketRows.results || [];
+    const leagueId=String(env.LEAGUE_ID||'').trim();
+    if(leagueId) {
+      try {
+        league=await leagueState(env,leagueId,String(env.SLEEPER_USER_ID||'').trim(),String(env.MY_ROSTER_ID||'').trim());
+      } catch(e) {
+        league={ok:false,error:String(e?.message||e),league_id:leagueId};
+      }
+    }
   }
+  const freeAgency=gate==='PASS'
+    ? buildFreeAgencyRadar(events,market,league)
+    : {available:false,reason:'WATCHER_GATE_'+gate,candidates:[]};
   return jsonCors({
-    schema:'draft-companion.watcher-feed.v1',
+    schema:'draft-companion.watcher-feed.v2',
     generatedAt:Date.now(),
     watcherVersion:VERSION,
     gate:{overall:gate,trending:publicRun(trending),player_state:publicRun(playerState)},
-    events,market
+    league,freeAgency,events,market
   });
 }
 
@@ -515,4 +594,4 @@ async function evidenceFingerprint(e) {
   return sha256(JSON.stringify(identity));
 }
 
-export { playerStateOf, trackedState, stateHash, inferThesisLink, marketSignals, evidenceFingerprint, depthChartOrderOf, normalizeRunType, normalizeRunSource, runsQuery };
+export { playerStateOf, trackedState, stateHash, inferThesisLink, marketSignals, evidenceFingerprint, depthChartOrderOf, normalizeRunType, normalizeRunSource, runsQuery, ownershipStatus, buildFreeAgencyRadar };
