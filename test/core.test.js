@@ -62,3 +62,12 @@ test('watcher bounds trending history to previous plus current capture', async (
   assert.match(source, /DELETE FROM trending_snapshots WHERE captured_at < \?1/);
   assert.match(source, /ORDER BY captured_at DESC LIMIT 1/);
 });
+
+
+test('companion feed probes only latest scheduled run per type', async () => {
+  const fs = await import('node:fs/promises');
+  const source = await fs.readFile(new URL('../src/index.js', import.meta.url), 'utf8');
+  assert.match(source, /run_type='trending:scheduled' ORDER BY id DESC LIMIT 1/);
+  assert.match(source, /run_type='player_state:scheduled' ORDER BY id DESC LIMIT 1/);
+  assert.doesNotMatch(source, /WHERE run_type IN \('trending:scheduled','player_state:scheduled'\)[\s\S]{0,100}LIMIT 40/);
+});
