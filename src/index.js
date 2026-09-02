@@ -1,6 +1,6 @@
 const HOUR = 3600_000;
 const DAY = 24 * HOUR;
-const VERSION = '0.2.4';
+const VERSION = '0.2.5';
 
 export default {
   async fetch(request, env) {
@@ -199,15 +199,14 @@ function buildFreeAgencyRadar(events = [], market = [], league = null) {
 }
 
 async function companionFeed(env) {
-  const healthRows = await env.DB.prepare(`
-    SELECT run_type,started_at,finished_at,ok,item_count
-    FROM watcher_runs
-    WHERE run_type IN ('trending:scheduled','player_state:scheduled')
-    ORDER BY started_at DESC
-    LIMIT 40`).all();
-  const scheduled = healthRows.results || [];
-  const trending = scheduled.find(x => x.run_type === 'trending:scheduled') || null;
-  const playerState = scheduled.find(x => x.run_type === 'player_state:scheduled') || null;
+  // id is the INTEGER PRIMARY KEY, so reverse-id probes avoid repeatedly scanning
+  // the complete run history merely to establish health.
+  const [trending, playerState] = await Promise.all([
+    env.DB.prepare(`SELECT run_type,started_at,finished_at,ok,item_count FROM watcher_runs
+      WHERE run_type='trending:scheduled' ORDER BY id DESC LIMIT 1`).first(),
+    env.DB.prepare(`SELECT run_type,started_at,finished_at,ok,item_count FROM watcher_runs
+      WHERE run_type='player_state:scheduled' ORDER BY id DESC LIMIT 1`).first()
+  ]);
   const now = Date.now();
   const runPass = (x,maxAgeMs) => !!(x && Number(x.ok) === 1 && x.finished_at != null && Number.isFinite(Number(x.started_at)) && now-Number(x.started_at) >= 0 && now-Number(x.started_at) <= maxAgeMs);
   const explicitFail = [trending,playerState].some(x => x && (Number(x.ok) !== 1 || x.finished_at == null));
