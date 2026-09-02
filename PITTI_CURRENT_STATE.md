@@ -1,7 +1,7 @@
 # PITTI CURRENT STATE
 
-Updated: 2026-09-01
-Watcher version: v0.2.5
+Updated: 2026-09-02
+Watcher version: v0.2.6
 Mode: POST_DRAFT / PRE_WEEK_1
 
 ## Source of truth
@@ -78,7 +78,7 @@ Draft-only return probability, ADP-return logic and opponent pick prediction are
 ## Next technical priorities
 
 1. Deploy current `main` to the Cloudflare Worker if the deployment is not automatic.
-2. Verify `/health` reports v0.2.2.
+2. Verify `/health` reports v0.2.6.
 3. Verify `/league-state` resolves the correct league and user roster.
 4. Confirm live Sleeper state shows the reported Charbonnet reserve/IR + Bigsby roster move.
 5. Verify `/companion-feed` v2 returns `freeAgency.available=true` and excludes all owned players.
@@ -97,3 +97,14 @@ Draft-only return probability, ADP-return logic and opponent pick prediction are
 - This confirms the write amplification fix is effective while a read-amplified feed health query remains.
 - companionFeed now probes only the newest scheduled trending/player-state run via reverse INTEGER PRIMARY KEY id instead of selecting/scanning up to 40 mixed run rows.
 - No cron-frequency reduction; 15-minute market detection remains intact.
+
+
+## v0.2.6 FA / trade foundation
+- Work is isolated on branch `pitti-auto/v0.2.6-fa-trade-foundation` until validation; main remains the last accepted source.
+- Added roster-relative move radar: reserve/IR is excluded from drop candidates and starters receive explicit protection.
+- Corrected free-agency evidence name extraction so persisted JSON text is parsed rather than treated as an object.
+- Added bounded player metadata hydration for roster and market candidates; no full player_state scan is added to the 15-minute feed path.
+- Added trade discovery over opponent rosters, but every target is deliberately non-actionable until an external valuation source and roster-fit analysis are present.
+- Justin Boone trade values are a planned primary trade input when a current public chart is available; they are not fabricated or inferred when absent.
+- No add/drop/trade is executed automatically.
+- Validation requirement before merge: syntax + unit tests, then live Worker health/league/feed checks after deployment capability is available.
