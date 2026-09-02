@@ -176,19 +176,28 @@ function buildRosterMoveRadar(freeAgency, league, playerStates = []) {
   const dropCandidates=active.map(id=>{
     const p=stateById.get(id)||{};
     const starter=starters.has(id);
+    // Fail closed: the watcher may discover active drop-eligible roster spots, but it
+    // must not rank skill-position bench players without current replacement/upside
+    // evidence. K/DST are streamable roster-capacity candidates; starters/QB are protected.
+    const streamable=p.position==='K' || p.position==='DEF';
     let protection=starter ? 1000 : 0;
     if (p.position==='QB') protection+=250;
-    if (p.position==='K' || p.position==='DEF') protection-=100;
+    if (streamable) protection-=100;
+    const evidenceReady=streamable;
     return {
       player_id:id, full_name:p.full_name||id, team:p.team||null, position:p.position||null,
-      starter, reserve:false, drop_protection:protection
+      starter, reserve:false, drop_protection:protection,
+      evidence_ready:evidenceReady,
+      actionable:evidenceReady && !starter,
+      valuation_status:evidenceReady?'streamable_position':'awaiting_current_replacement_upside_evidence'
     };
   }).sort((a,b)=>a.drop_protection-b.drop_protection || String(a.full_name).localeCompare(String(b.full_name)));
   return {
     available:true, generated_at:Date.now(),
     add_candidates:(freeAgency.candidates||[]).slice(0,25),
     drop_candidates:dropCandidates,
-    policy:{reserve_excluded:true,starter_protected:true,automatic_moves:false}
+    actionable_drop_candidates:dropCandidates.filter(x=>x.actionable),
+    policy:{reserve_excluded:true,starter_protected:true,skill_bench_fail_closed:true,automatic_moves:false}
   };
 }
 
