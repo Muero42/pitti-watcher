@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ownershipStatus, buildFreeAgencyRadar, marketSignals, previousTrendingSnapshotSql } from '../src/index.js';
+import { ownershipStatus, buildFreeAgencyRadar, buildRosterMoveRadar, buildTradeRadar, safePayload, marketSignals, previousTrendingSnapshotSql } from '../src/index.js';
 
 test('ownershipStatus distinguishes mine, opponent, and free agent', () => {
   const league={ownership:{
@@ -69,5 +69,56 @@ test('companion feed probes only latest scheduled run per type', async () => {
   const source = await fs.readFile(new URL('../src/index.js', import.meta.url), 'utf8');
   assert.match(source, /run_type='trending:scheduled' ORDER BY id DESC LIMIT 1/);
   assert.match(source, /run_type='player_state:scheduled' ORDER BY id DESC LIMIT 1/);
-  assert.doesNotMatch(source, /WHERE run_type IN \('trending:scheduled','player_state:scheduled'\)[\s\S]{0,100}LIMIT 40/);
+  const feedSource=source.slice(source.indexOf('async function companionFeed'), source.indexOf('async function runTrending'));
+  assert.doesNotMatch(feedSource, /WHERE run_type IN \('trending:scheduled','player_state:scheduled'\)[\s\S]{0,100}LIMIT 40/);
+});
+
+
+test('free-agency payload parser accepts stored JSON text', () => {
+  assert.equal(safePayload('{"player":"Example"}').player,'Example');
+  assert.deepEqual(safePayload('{broken'),{});
+});
+
+test('roster move radar excludes reserve and protects starters', () => {
+  const league={ok:true,my_roster:{roster_id:9},my_players:['START','BENCH','IR'],my_reserve:['IR'],my_starters:['START']};
+  const fa={available:true,candidates:[{player_id:'FA',signal_score:10}]};
+  const states=[
+    {player_id:'START',full_name:'Starter',position:'RB'},
+    {player_id:'BENCH',full_name:'Bench',position:'WR'},
+    {player_id:'IR',full_name:'Reserve',position:'RB'}
+  ];
+  const x=buildRosterMoveRadar(fa,league,states);
+  assert.equal(x.available,true);
+  assert.deepEqual(x.drop_candidates.map(p=>p.player_id),['BENCH','START']);
+  assert.ok(!x.drop_candidates.some(p=>p.player_id==='IR'));
+  assert.equal(x.drop_candidates.find(p=>p.player_id==='BENCH').actionable,false);
+  assert.equal(x.drop_candidates.find(p=>p.player_id==='BENCH').valuation_status,'awaiting_current_replacement_upside_evidence');
+  assert.equal(x.policy.skill_bench_fail_closed,true);
+  assert.equal(x.policy.automatic_moves,false);
+});
+
+test('trade radar is discovery-only until external valuation and fit exist', () => {
+  const league={ok:true,my_roster:{roster_id:9},my_players:['ME'],rosters:[
+    {roster_id:9,owner_id:'me',players:['ME']},
+    {roster_id:2,owner_id:'them',players:['TARGET']}
+  ]};
+  const x=buildTradeRadar(league,[{player_id:'TARGET',full_name:'Target',position:'RB'}]);
+  assert.equal(x.available,true);
+  assert.equal(x.targets.length,1);
+  assert.equal(x.targets[0].actionable,false);
+  assert.equal(x.targets[0].valuation.boone,null);
+  assert.equal(x.policy.automatic_trades,false);
+});
+
+test('roster move radar exposes streamable K/DST capacity without making skill bench actionable', () => {
+  const league={ok:true,my_roster:{roster_id:9},my_players:['WR','K','DST'],my_reserve:[],my_starters:[]};
+  const fa={available:true,candidates:[]};
+  const states=[
+    {player_id:'WR',full_name:'Upside WR',position:'WR'},
+    {player_id:'K',full_name:'Kicker',position:'K'},
+    {player_id:'DST',full_name:'Defense',position:'DEF'}
+  ];
+  const x=buildRosterMoveRadar(fa,league,states);
+  assert.deepEqual(x.actionable_drop_candidates.map(p=>p.player_id).sort(),['DST','K']);
+  assert.equal(x.drop_candidates.find(p=>p.player_id==='WR').actionable,false);
 });

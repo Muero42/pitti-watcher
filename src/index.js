@@ -1,6 +1,6 @@
 const HOUR = 3600_000;
 const DAY = 24 * HOUR;
-const VERSION = '0.2.5';
+const VERSION = '0.2.6';
 
 export default {
   async fetch(request, env) {
@@ -159,6 +159,77 @@ function ownershipStatus(league, playerId) {
   return x.mine ? 'mine' : 'opponent';
 }
 
+function safePayload(payload) {
+  if (!payload) return {};
+  if (typeof payload === 'object') return payload;
+  try { return JSON.parse(payload); } catch (_) { return {}; }
+}
+
+function buildRosterMoveRadar(freeAgency, league, playerStates = []) {
+  if (!freeAgency?.available || !league?.ok || !league?.my_roster) {
+    return { available:false, reason:'ROSTER_OR_FREE_AGENCY_UNAVAILABLE', add_candidates:[], drop_candidates:[] };
+  }
+  const reserve=new Set((league.my_reserve||[]).map(String));
+  const starters=new Set((league.my_starters||[]).filter(Boolean).map(String));
+  const stateById=new Map((playerStates||[]).map(p=>[String(p.player_id),p]));
+  const active=(league.my_players||[]).map(String).filter(id=>!reserve.has(id));
+  const dropCandidates=active.map(id=>{
+    const p=stateById.get(id)||{};
+    const starter=starters.has(id);
+    // Fail closed: the watcher may discover active drop-eligible roster spots, but it
+    // must not rank skill-position bench players without current replacement/upside
+    // evidence. K/DST are streamable roster-capacity candidates; starters/QB are protected.
+    const streamable=p.position==='K' || p.position==='DEF';
+    let protection=starter ? 1000 : 0;
+    if (p.position==='QB') protection+=250;
+    if (streamable) protection-=100;
+    const evidenceReady=streamable;
+    return {
+      player_id:id, full_name:p.full_name||id, team:p.team||null, position:p.position||null,
+      starter, reserve:false, drop_protection:protection,
+      evidence_ready:evidenceReady,
+      actionable:evidenceReady && !starter,
+      valuation_status:evidenceReady?'streamable_position':'awaiting_current_replacement_upside_evidence'
+    };
+  }).sort((a,b)=>a.drop_protection-b.drop_protection || String(a.full_name).localeCompare(String(b.full_name)));
+  return {
+    available:true, generated_at:Date.now(),
+    add_candidates:(freeAgency.candidates||[]).slice(0,25),
+    drop_candidates:dropCandidates,
+    actionable_drop_candidates:dropCandidates.filter(x=>x.actionable),
+    policy:{reserve_excluded:true,starter_protected:true,skill_bench_fail_closed:true,automatic_moves:false}
+  };
+}
+
+function buildTradeRadar(league, playerStates = []) {
+  if (!league?.ok || !league?.my_roster) return { available:false, reason:'LEAGUE_STATE_UNAVAILABLE', targets:[] };
+  const stateById=new Map((playerStates||[]).map(p=>[String(p.player_id),p]));
+  const mine=new Set((league.my_players||[]).map(String));
+  const targets=[];
+  for (const r of league.rosters||[]) {
+    if (String(r.roster_id)===String(league.my_roster.roster_id)) continue;
+    for (const id of r.players||[]) {
+      const pid=String(id); if(mine.has(pid)) continue;
+      const p=stateById.get(pid)||{};
+      targets.push({
+        player_id:pid, full_name:p.full_name||pid, team:p.team||null, position:p.position||null,
+        roster_id:r.roster_id, owner_id:r.owner_id,
+        valuation:{status:'awaiting_external_value_source',boone:null,consensus:null},
+        actionable:false
+      });
+    }
+  }
+  return {
+    available:true, generated_at:Date.now(), targets,
+    policy:{
+      boone_trade_value:'planned_primary_input_when_current_public_chart_is available',
+      expert_consensus:'required_before_action',
+      roster_fit:'required_before_action',
+      automatic_trades:false
+    }
+  };
+}
+
 function buildFreeAgencyRadar(events = [], market = [], league = null) {
   if (!league?.ok) return { available:false, reason:'LEAGUE_STATE_UNAVAILABLE', candidates:[] };
   const byPlayer = new Map();
@@ -184,7 +255,7 @@ function buildFreeAgencyRadar(events = [], market = [], league = null) {
     const signalScore=(fundamental.length?1000:0)+(marketEvents.length?250:0)+adds1*4+adds3+Math.min(adds24,200)-drops1*2;
     candidates.push({
       player_id:x.player_id,
-      full_name:x.market?.full_name || fundamental[0]?.payload_json?.player || null,
+      full_name:x.market?.full_name || safePayload(fundamental[0]?.payload_json).player || null,
       team:x.market?.team||null, position:x.market?.position||null,
       availability:'free_agent',
       fundamental_events:fundamental.length,
@@ -213,7 +284,7 @@ async function companionFeed(env) {
   const gate = runPass(trending,45*60_000) && runPass(playerState,36*HOUR) ? 'PASS' :
     (explicitFail ? 'FAIL' : (trending && playerState ? 'STALE' : 'WAIT_FOR_SCHEDULED_EVIDENCE'));
 
-  let events = [], market = [], league = null;
+  let events = [], market = [], league = null, playerStates = [];
   if (gate === 'PASS') {
     const [eventRows, marketRows] = await Promise.all([
       env.DB.prepare(`SELECT id,player_id,event_type,fundamental_or_market,occurred_at,first_seen_at,last_seen_at,source,original_source,authority,confidence,thesis_link,payload_json
@@ -228,11 +299,27 @@ async function companionFeed(env) {
     ]);
     events = eventRows.results || [];
     market = marketRows.results || [];
+    const ids=[...new Set([...(league?.my_players||[]), ...market.map(x=>x.player_id)].filter(Boolean).map(String))];
+    // playerStates is filled after league resolution below; keeping this list bounded avoids full-table reads.
     const context=await resolveLeagueContext(env);
     if(context.leagueId) {
       try {
         league=await leagueState(env,context.leagueId,context.userId,context.rosterId);
         league.context={draft_id:context.draftId,my_slot:context.mySlot};
+        const relevantIds=[...new Set([
+          ...(league.my_players||[]),
+          ...(league.rosters||[]).flatMap(r=>r.players||[]),
+          ...market.map(x=>x.player_id)
+        ].filter(Boolean).map(String))];
+        if (relevantIds.length) {
+          const CHUNK=75;
+          for(let i=0;i<relevantIds.length;i+=CHUNK){
+            const chunk=relevantIds.slice(i,i+CHUNK);
+            const marks=chunk.map((_,j)=>'?'+(j+1)).join(',');
+            const rows=await env.DB.prepare(`SELECT player_id,full_name,team,position,injury_status,status,depth_chart_order FROM player_state WHERE player_id IN (${marks})`).bind(...chunk).all();
+            playerStates.push(...(rows.results||[]));
+          }
+        }
       } catch(e) {
         league={ok:false,error:String(e?.message||e),league_id:context.leagueId,context};
       }
@@ -241,12 +328,18 @@ async function companionFeed(env) {
   const freeAgency=gate==='PASS'
     ? buildFreeAgencyRadar(events,market,league)
     : {available:false,reason:'WATCHER_GATE_'+gate,candidates:[]};
+  const rosterMoves=gate==='PASS'
+    ? buildRosterMoveRadar(freeAgency,league,playerStates)
+    : {available:false,reason:'WATCHER_GATE_'+gate,add_candidates:[],drop_candidates:[]};
+  const trades=gate==='PASS'
+    ? buildTradeRadar(league,playerStates)
+    : {available:false,reason:'WATCHER_GATE_'+gate,targets:[]};
   return jsonCors({
     schema:'draft-companion.watcher-feed.v2',
     generatedAt:Date.now(),
     watcherVersion:VERSION,
     gate:{overall:gate,trending:publicRun(trending),player_state:publicRun(playerState)},
-    league,freeAgency,events,market
+    league,freeAgency,rosterMoves,trades,events,market
   });
 }
 
@@ -627,4 +720,4 @@ async function evidenceFingerprint(e) {
   return sha256(JSON.stringify(identity));
 }
 
-export { playerStateOf, trackedState, stateHash, inferThesisLink, marketSignals, evidenceFingerprint, depthChartOrderOf, normalizeRunType, normalizeRunSource, runsQuery, ownershipStatus, buildFreeAgencyRadar, resolveLeagueContext, previousTrendingSnapshotSql };
+export { playerStateOf, trackedState, stateHash, inferThesisLink, marketSignals, evidenceFingerprint, depthChartOrderOf, normalizeRunType, normalizeRunSource, runsQuery, ownershipStatus, buildFreeAgencyRadar, buildRosterMoveRadar, buildTradeRadar, safePayload, resolveLeagueContext, previousTrendingSnapshotSql };

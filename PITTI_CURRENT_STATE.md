@@ -1,12 +1,12 @@
 # PITTI CURRENT STATE
 
-Updated: 2026-09-01
-Watcher version: v0.2.5
+Updated: 2026-09-02
+Watcher version: v0.2.6
 Mode: POST_DRAFT / PRE_WEEK_1
 
 ## Source of truth
 
-This file is the canonical PITTI project checkpoint for chat handoffs. Code state is the current `main` branch of `Muero42/pitti-watcher`.
+This file is the canonical PITTI project checkpoint for chat handoffs. Accepted/deployed code authority is the current `main` branch of `Muero42/pitti-watcher`. Experimental v0.2.6 work is isolated on `pitti-auto/v0.2.6-fa-trade-foundation` until merged; this checkpoint may describe that isolated candidate explicitly.
 
 ## League / draft context
 
@@ -71,14 +71,15 @@ Draft-only return probability, ADP-return logic and opponent pick prediction are
 
 ## Current technical verification
 
+- v0.2.6 isolated candidate head `aa117887b5c5479fd49acc40e7a4b39e984c6cd7` passed the dedicated GitHub syntax/core CI on 2026-09-02 (11/11 tests after correcting the companion-feed test scope).
 - v0.2.3 source includes the bounded previous-snapshot D1 query and regression coverage.
 - Unit tests exist in `test/core.test.js` for ownership filtering, free-agent radar prioritization, and market thresholds.
 - Wrangler config now contains the completed draft ID and user draft slot so the worker can resolve the live league without hardcoding an unverified league ID.
 
 ## Next technical priorities
 
-1. Deploy current `main` to the Cloudflare Worker if the deployment is not automatic.
-2. Verify `/health` reports v0.2.2.
+1. Keep v0.2.6 isolated until deployment capability and live post-deploy checks are available; do not claim `main` or the Worker is v0.2.6 before that.
+2. After an intentional v0.2.6 deployment, verify `/health` reports v0.2.6.
 3. Verify `/league-state` resolves the correct league and user roster.
 4. Confirm live Sleeper state shows the reported Charbonnet reserve/IR + Bigsby roster move.
 5. Verify `/companion-feed` v2 returns `freeAgency.available=true` and excludes all owned players.
@@ -97,3 +98,21 @@ Draft-only return probability, ADP-return logic and opponent pick prediction are
 - This confirms the write amplification fix is effective while a read-amplified feed health query remains.
 - companionFeed now probes only the newest scheduled trending/player-state run via reverse INTEGER PRIMARY KEY id instead of selecting/scanning up to 40 mixed run rows.
 - No cron-frequency reduction; 15-minute market detection remains intact.
+
+
+## v0.2.6 FA / trade foundation
+- Work is isolated on branch `pitti-auto/v0.2.6-fa-trade-foundation` until validation; main remains the last accepted source.
+- Added roster-relative move radar: reserve/IR is excluded from drop candidates and starters receive explicit protection.
+- Corrected free-agency evidence name extraction so persisted JSON text is parsed rather than treated as an object.
+- Added bounded player metadata hydration for roster and market candidates; no full player_state scan is added to the 15-minute feed path.
+- Added trade discovery over opponent rosters, but every target is deliberately non-actionable until an external valuation source and roster-fit analysis are present.
+- Justin Boone trade values are a planned primary trade input when a current public chart is available; they are not fabricated or inferred when absent.
+- No add/drop/trade is executed automatically.
+- Validation requirement before merge: syntax + unit tests, then live Worker health/league/feed checks after deployment capability is available.
+
+
+## Boone trade-value research (2026-09-02)
+- Public theScore pages confirm Boone's redraft Trade Value Chart is openly readable and includes positional trade values/rest-of-season framing; historical Week 1 editions establish that the series is an in-season product.
+- Search did not surface a verified 2026 redraft Week 1 chart yet. Do not substitute the dynasty September chart: it is a different format (12-team PPR dynasty) and unsuitable as the primary value input for this 10-team Half-PPR redraft league.
+- Integration rule: ingest only a current redraft Boone chart, preserve its scoring-format columns, select HALF when available, and adapt it as one valuation signal rather than treating 12-team raw values as exact 10-team prices.
+- Until the 2026 redraft chart exists, trade discovery may use roster construction and other current expert evidence, but Boone valuation remains null and cannot make a target actionable.
