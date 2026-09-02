@@ -90,6 +90,9 @@ test('roster move radar excludes reserve and protects starters', () => {
   assert.equal(x.available,true);
   assert.deepEqual(x.drop_candidates.map(p=>p.player_id),['BENCH','START']);
   assert.ok(!x.drop_candidates.some(p=>p.player_id==='IR'));
+  assert.equal(x.drop_candidates.find(p=>p.player_id==='BENCH').actionable,false);
+  assert.equal(x.drop_candidates.find(p=>p.player_id==='BENCH').valuation_status,'awaiting_current_replacement_upside_evidence');
+  assert.equal(x.policy.skill_bench_fail_closed,true);
   assert.equal(x.policy.automatic_moves,false);
 });
 
@@ -104,4 +107,17 @@ test('trade radar is discovery-only until external valuation and fit exist', () 
   assert.equal(x.targets[0].actionable,false);
   assert.equal(x.targets[0].valuation.boone,null);
   assert.equal(x.policy.automatic_trades,false);
+});
+
+test('roster move radar exposes streamable K/DST capacity without making skill bench actionable', () => {
+  const league={ok:true,my_roster:{roster_id:9},my_players:['WR','K','DST'],my_reserve:[],my_starters:[]};
+  const fa={available:true,candidates:[]};
+  const states=[
+    {player_id:'WR',full_name:'Upside WR',position:'WR'},
+    {player_id:'K',full_name:'Kicker',position:'K'},
+    {player_id:'DST',full_name:'Defense',position:'DEF'}
+  ];
+  const x=buildRosterMoveRadar(fa,league,states);
+  assert.deepEqual(x.actionable_drop_candidates.map(p=>p.player_id).sort(),['DST','K']);
+  assert.equal(x.drop_candidates.find(p=>p.player_id==='WR').actionable,false);
 });
