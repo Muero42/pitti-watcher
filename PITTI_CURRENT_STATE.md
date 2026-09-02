@@ -1,7 +1,7 @@
 # PITTI CURRENT STATE
 
 Updated: 2026-09-01
-Watcher version: v0.2.4
+Watcher version: v0.2.5
 Mode: POST_DRAFT / PRE_WEEK_1
 
 ## Source of truth
@@ -90,3 +90,10 @@ Draft-only return probability, ADP-return logic and opponent pick prediction are
 - Trending history is bounded to the immediately previous capture plus current capture; historical snapshots are deleted before each new capture.
 - Previous snapshot lookup uses ORDER BY captured_at DESC LIMIT 1 and the resolved timestamp is reused by market detection.
 - Intended result: ~200 trending inserts per 15-minute run remain, but historical rows_read growth and thousands of unchanged player_state writes are eliminated.
+
+
+## Cloudflare D1 v0.2.5 read hardening
+- Post-v0.2.4 observation: 30-minute window showed only 4 rows_written but ~8k rows_read across 10 queries.
+- This confirms the write amplification fix is effective while a read-amplified feed health query remains.
+- companionFeed now probes only the newest scheduled trending/player-state run via reverse INTEGER PRIMARY KEY id instead of selecting/scanning up to 40 mixed run rows.
+- No cron-frequency reduction; 15-minute market detection remains intact.
