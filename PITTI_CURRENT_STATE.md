@@ -108,3 +108,10 @@ Draft-only return probability, ADP-return logic and opponent pick prediction are
 - Justin Boone trade values are a planned primary trade input when a current public chart is available; they are not fabricated or inferred when absent.
 - No add/drop/trade is executed automatically.
 - Validation requirement before merge: syntax + unit tests, then live Worker health/league/feed checks after deployment capability is available.
+
+
+## Boone trade-value research (2026-09-02)
+- Public theScore pages confirm Boone's redraft Trade Value Chart is openly readable and includes positional trade values/rest-of-season framing; historical Week 1 editions establish that the series is an in-season product.
+- Search did not surface a verified 2026 redraft Week 1 chart yet. Do not substitute the dynasty September chart: it is a different format (12-team PPR dynasty) and unsuitable as the primary value input for this 10-team Half-PPR redraft league.
+- Integration rule: ingest only a current redraft Boone chart, preserve its scoring-format columns, select HALF when available, and adapt it as one valuation signal rather than treating 12-team raw values as exact 10-team prices.
+- Until the 2026 redraft chart exists, trade discovery may use roster construction and other current expert evidence, but Boone valuation remains null and cannot make a target actionable.
