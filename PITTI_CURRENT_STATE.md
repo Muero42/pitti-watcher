@@ -1,7 +1,7 @@
 # PITTI CURRENT STATE
 
 Updated: 2026-09-01
-Watcher version: v0.2.3
+Watcher version: v0.2.4
 Mode: POST_DRAFT / PRE_WEEK_1
 
 ## Source of truth
@@ -83,3 +83,10 @@ Draft-only return probability, ADP-return logic and opponent pick prediction are
 4. Confirm live Sleeper state shows the reported Charbonnet reserve/IR + Bigsby roster move.
 5. Verify `/companion-feed` v2 returns `freeAgency.available=true` and excludes all owned players.
 6. Only after that, connect roster-relative add/drop scoring in the Companion UI.
+
+
+## Cloudflare D1 v0.2.4 hardening
+- Unchanged daily player-state observations are now write-free; successful watcher_runs provide liveness evidence.
+- Trending history is bounded to the immediately previous capture plus current capture; historical snapshots are deleted before each new capture.
+- Previous snapshot lookup uses ORDER BY captured_at DESC LIMIT 1 and the resolved timestamp is reused by market detection.
+- Intended result: ~200 trending inserts per 15-minute run remain, but historical rows_read growth and thousands of unchanged player_state writes are eliminated.
