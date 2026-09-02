@@ -1,6 +1,6 @@
 const HOUR = 3600_000;
 const DAY = 24 * HOUR;
-const VERSION = '0.2.3';
+const VERSION = '0.2.4';
 
 export default {
   async fetch(request, env) {
@@ -360,17 +360,26 @@ async function runTrending(env, at, source = 'internal') {
       trendingWindow(env,'drop',1,limit), trendingWindow(env,'drop',6,limit), trendingWindow(env,'drop',24,limit)
     ]);
     const ids = new Set([...a1.keys(),...a3.keys(),...a6.keys(),...a24.keys(),...d1.keys(),...d6.keys(),...d24.keys()]);
+    // Keep only the immediately preceding capture plus the current capture. This
+    // bounds both D1 storage and MAX(captured_at) reads while preserving delta signals.
+    const previousAt = await latestTrendingCaptureBefore(env, at);
+    await env.DB.prepare('DELETE FROM trending_snapshots WHERE captured_at < ?1').bind(previousAt ?? at).run();
     const stmt = env.DB.prepare(`INSERT INTO trending_snapshots(captured_at,player_id,adds_1h,adds_3h,adds_6h,adds_24h,drops_1h,drops_6h,drops_24h) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)`);
     const batch = [];
     for (const id of ids) batch.push(stmt.bind(at,id,a1.get(id)||0,a3.get(id)||0,a6.get(id)||0,a24.get(id)||0,d1.get(id)||0,d6.get(id)||0,d24.get(id)||0));
     if (batch.length) await env.DB.batch(batch);
-    await detectMarketEvents(env, at);
+    await detectMarketEvents(env, at, previousAt);
     await finishRun(env, runId, true, ids.size);
     return { ok: true, captured_at: at, players: ids.size };
   } catch (e) {
     await finishRun(env, runId, false, 0, String(e?.message || e));
     throw e;
   }
+}
+
+async function latestTrendingCaptureBefore(env, at) {
+  const row = await env.DB.prepare('SELECT captured_at FROM trending_snapshots WHERE captured_at < ?1 ORDER BY captured_at DESC LIMIT 1').bind(at).first();
+  return row?.captured_at ?? null;
 }
 
 function previousTrendingSnapshotSql() {
@@ -388,10 +397,10 @@ function previousTrendingSnapshotSql() {
   `;
 }
 
-async function detectMarketEvents(env, at) {
+async function detectMarketEvents(env, at, previousAt = null) {
   const [currentResult, previousResult] = await Promise.all([
     env.DB.prepare(`SELECT * FROM trending_snapshots WHERE captured_at=?1`).bind(at).all(),
-    env.DB.prepare(previousTrendingSnapshotSql()).bind(at).all()
+    previousAt === null ? Promise.resolve({ results: [] }) : env.DB.prepare(`SELECT * FROM trending_snapshots WHERE captured_at=?1`).bind(previousAt).all()
   ]);
 
   const previous = new Map(
@@ -508,14 +517,9 @@ async function runPlayerState(env, at, source = 'internal') {
         continue;
       }
 
-      if (old.state_hash === hash) {
-        writes.push(
-          env.DB.prepare(
-            'UPDATE player_state SET last_seen_at=?1 WHERE player_id=?2'
-          ).bind(at, id)
-        );
-        continue;
-      }
+      // Unchanged state is deliberately write-free. last_seen_at is not used as
+      // liveness evidence; watcher_runs records successful full-state observations.
+      if (old.state_hash === hash) continue;
 
       changed++;
       const diffs = {};
