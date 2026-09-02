@@ -6,7 +6,7 @@ Mode: POST_DRAFT / PRE_WEEK_1
 
 ## Source of truth
 
-This file is the canonical PITTI project checkpoint for chat handoffs. Code state is the current `main` branch of `Muero42/pitti-watcher`.
+This file is the canonical PITTI project checkpoint for chat handoffs. Accepted/deployed code authority is the current `main` branch of `Muero42/pitti-watcher`. Experimental v0.2.6 work is isolated on `pitti-auto/v0.2.6-fa-trade-foundation` until merged; this checkpoint may describe that isolated candidate explicitly.
 
 ## League / draft context
 
@@ -71,14 +71,15 @@ Draft-only return probability, ADP-return logic and opponent pick prediction are
 
 ## Current technical verification
 
+- v0.2.6 isolated candidate head `aa117887b5c5479fd49acc40e7a4b39e984c6cd7` passed the dedicated GitHub syntax/core CI on 2026-09-02 (11/11 tests after correcting the companion-feed test scope).
 - v0.2.3 source includes the bounded previous-snapshot D1 query and regression coverage.
 - Unit tests exist in `test/core.test.js` for ownership filtering, free-agent radar prioritization, and market thresholds.
 - Wrangler config now contains the completed draft ID and user draft slot so the worker can resolve the live league without hardcoding an unverified league ID.
 
 ## Next technical priorities
 
-1. Deploy current `main` to the Cloudflare Worker if the deployment is not automatic.
-2. Verify `/health` reports v0.2.6.
+1. Keep v0.2.6 isolated until deployment capability and live post-deploy checks are available; do not claim `main` or the Worker is v0.2.6 before that.
+2. After an intentional v0.2.6 deployment, verify `/health` reports v0.2.6.
 3. Verify `/league-state` resolves the correct league and user roster.
 4. Confirm live Sleeper state shows the reported Charbonnet reserve/IR + Bigsby roster move.
 5. Verify `/companion-feed` v2 returns `freeAgency.available=true` and excludes all owned players.
