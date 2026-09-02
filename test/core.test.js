@@ -47,3 +47,18 @@ test('previous trending snapshot query is bounded to one capture instead of scan
   assert.doesNotMatch(sql,/GROUP BY/i);
   assert.doesNotMatch(sql,/JOIN/i);
 });
+
+
+test('watcher source keeps unchanged player state write-free', async () => {
+  const fs = await import('node:fs/promises');
+  const source = await fs.readFile(new URL('../src/index.js', import.meta.url), 'utf8');
+  assert.match(source, /if \(old\.state_hash === hash\) continue;/);
+  assert.doesNotMatch(source, /UPDATE player_state SET last_seen_at=\?1 WHERE player_id=\?2/);
+});
+
+test('watcher bounds trending history to previous plus current capture', async () => {
+  const fs = await import('node:fs/promises');
+  const source = await fs.readFile(new URL('../src/index.js', import.meta.url), 'utf8');
+  assert.match(source, /DELETE FROM trending_snapshots WHERE captured_at < \?1/);
+  assert.match(source, /ORDER BY captured_at DESC LIMIT 1/);
+});
