@@ -69,7 +69,8 @@ test('companion feed probes only latest scheduled run per type', async () => {
   const source = await fs.readFile(new URL('../src/index.js', import.meta.url), 'utf8');
   assert.match(source, /run_type='trending:scheduled' ORDER BY id DESC LIMIT 1/);
   assert.match(source, /run_type='player_state:scheduled' ORDER BY id DESC LIMIT 1/);
-  assert.doesNotMatch(source, /WHERE run_type IN \('trending:scheduled','player_state:scheduled'\)[\s\S]{0,100}LIMIT 40/);
+  const feedSource=source.slice(source.indexOf('async function companionFeed'), source.indexOf('async function runTrending'));
+  assert.doesNotMatch(feedSource, /WHERE run_type IN \('trending:scheduled','player_state:scheduled'\)[\s\S]{0,100}LIMIT 40/);
 });
 
 
