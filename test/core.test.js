@@ -71,3 +71,11 @@ test('companion feed probes only latest scheduled run per type', async () => {
   assert.match(source, /run_type='player_state:scheduled' ORDER BY id DESC LIMIT 1/);
   assert.doesNotMatch(source, /WHERE run_type IN \('trending:scheduled','player_state:scheduled'\)[\s\S]{0,100}LIMIT 40/);
 });
+
+
+test('scheduled trending retention is write-bounded', () => {
+  assert.match(source, /async function pruneTrendingSnapshots/);
+  assert.match(source, /LIMIT \?2/);
+  assert.match(source, /TREND_PRUNE_BATCH/);
+  assert.doesNotMatch(source, /DELETE FROM trending_snapshots WHERE captured_at < \?1/);
+});
