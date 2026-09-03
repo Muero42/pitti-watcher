@@ -56,18 +56,27 @@ test('watcher source keeps unchanged player state write-free', async () => {
   assert.doesNotMatch(source, /UPDATE player_state SET last_seen_at=\?1 WHERE player_id=\?2/);
 });
 
-test('watcher bounds trending history to previous plus current capture', async () => {
+test('watcher bounds trending history without unbounded cleanup writes', async () => {
   const fs = await import('node:fs/promises');
   const source = await fs.readFile(new URL('../src/index.js', import.meta.url), 'utf8');
-  assert.match(source, /DELETE FROM trending_snapshots WHERE captured_at < \?1/);
+  assert.match(source, /async function pruneTrendingSnapshots/);
+  assert.match(source, /ORDER BY captured_at ASC/);
+  assert.match(source, /LIMIT \?2/);
+  assert.match(source, /TREND_PRUNE_BATCH/);
   assert.match(source, /ORDER BY captured_at DESC LIMIT 1/);
+  assert.doesNotMatch(source, /await env\.DB\.prepare\('DELETE FROM trending_snapshots WHERE captured_at < \?1'\)/);
 });
 
 
 test('companion feed probes only latest scheduled run per type', async () => {
   const fs = await import('node:fs/promises');
   const source = await fs.readFile(new URL('../src/index.js', import.meta.url), 'utf8');
-  assert.match(source, /run_type='trending:scheduled' ORDER BY id DESC LIMIT 1/);
-  assert.match(source, /run_type='player_state:scheduled' ORDER BY id DESC LIMIT 1/);
-  assert.doesNotMatch(source, /WHERE run_type IN \('trending:scheduled','player_state:scheduled'\)[\s\S]{0,100}LIMIT 40/);
+  const start = source.indexOf('async function companionFeed');
+  const end = source.indexOf('async function runTrending');
+  const feedSource = source.slice(start, end);
+  assert.match(feedSource, /run_type='trending:scheduled' ORDER BY id DESC LIMIT 1/);
+  assert.match(feedSource, /run_type='player_state:scheduled' ORDER BY id DESC LIMIT 1/);
+  assert.doesNotMatch(feedSource, /WHERE run_type IN \('trending:scheduled','player_state:scheduled'\)[\s\S]{0,100}LIMIT 40/);
 });
+
+

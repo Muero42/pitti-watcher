@@ -362,7 +362,10 @@ async function runTrending(env, at, source = 'internal') {
     // Keep only the immediately preceding capture plus the current capture. This
     // bounds both D1 storage and MAX(captured_at) reads while preserving delta signals.
     const previousAt = await latestTrendingCaptureBefore(env, at);
-    await env.DB.prepare('DELETE FROM trending_snapshots WHERE captured_at < ?1').bind(previousAt ?? at).run();
+    // Never run an unbounded historical DELETE in the scheduled hot path. D1 counts
+    // deleted rows as rows_written, so legacy backlog could exhaust a fresh daily quota
+    // in one run. Retention is intentionally bounded and incremental.
+    await pruneTrendingSnapshots(env, previousAt ?? at);
     const stmt = env.DB.prepare(`INSERT INTO trending_snapshots(captured_at,player_id,adds_1h,adds_3h,adds_6h,adds_24h,drops_1h,drops_6h,drops_24h) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)`);
     const batch = [];
     for (const id of ids) batch.push(stmt.bind(at,id,a1.get(id)||0,a3.get(id)||0,a6.get(id)||0,a24.get(id)||0,d1.get(id)||0,d6.get(id)||0,d24.get(id)||0));
@@ -374,6 +377,21 @@ async function runTrending(env, at, source = 'internal') {
     await finishRun(env, runId, false, 0, String(e?.message || e));
     throw e;
   }
+}
+
+async function pruneTrendingSnapshots(env, keepFrom) {
+  const batchSize = clampInt(env.TREND_PRUNE_BATCH, 10, 500, 100);
+  // SQLite/D1 supports DELETE ... WHERE rowid IN (SELECT ... LIMIT ...).
+  // At most batchSize legacy rows are charged as writes per trending run.
+  return env.DB.prepare(`
+    DELETE FROM trending_snapshots
+    WHERE rowid IN (
+      SELECT rowid FROM trending_snapshots
+      WHERE captured_at < ?1
+      ORDER BY captured_at ASC
+      LIMIT ?2
+    )
+  `).bind(keepFrom, batchSize).run();
 }
 
 async function latestTrendingCaptureBefore(env, at) {
