@@ -9,7 +9,7 @@
     "db:init:local": "wrangler d1 migrations apply pitti_watcher --local",
     "db:init:remote": "wrangler d1 migrations apply pitti_watcher --remote",
     "test:syntax": "node --check src/index.js",
-    "test": "node --test test/core.test.js",
+    "test": "node --test test/*.test.js",
     "whoami": "wrangler whoami",
     "db:list": "wrangler d1 list"
   },

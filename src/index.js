@@ -335,12 +335,67 @@ async function api(env, path) {
 async function startRun(env, type, at, source = 'internal') {
   const storedType = source === 'scheduled' || source === 'debug' ? `${type}:${source}` : type;
   const x = await env.DB.prepare(`INSERT INTO watcher_runs(run_type,started_at) VALUES(?1,?2) RETURNING id`).bind(storedType, at).first();
+  validateRunId(x?.id);
   return x?.id;
 }
 
-async function finishRun(env, id, ok, count, error = null) {
-  if (!id) return;
-  await env.DB.prepare(`UPDATE watcher_runs SET finished_at=?1,ok=?2,item_count=?3,error=?4 WHERE id=?5`).bind(Date.now(), ok ? 1 : 0, count || 0, error, id).run();
+function finalizationError(code) {
+  const error = new Error(code);
+  error.code = code;
+  return error;
+}
+
+function validateRunId(id) {
+  if (!Number.isSafeInteger(id) || id <= 0) throw finalizationError('INVALID_RUN_ID');
+}
+
+async function finishRun(env, id, state) {
+  let result;
+  try {
+    result = await env.DB.prepare(`UPDATE watcher_runs SET finished_at=?1,ok=?2,item_count=?3,error=?4 WHERE id=?5 AND finished_at IS NULL`)
+      .bind(state.finished_at, state.ok, state.item_count, state.error, id).run();
+  } catch (_) {
+    throw finalizationError('FINALIZE_D1_ERROR');
+  }
+  if (result?.success !== true) throw finalizationError('FINALIZE_D1_RESULT');
+  if (result.meta?.changes !== 1) throw finalizationError('FINALIZE_NO_MATCH');
+}
+
+async function safeFinishRun(env, id, ok, count) {
+  validateRunId(id);
+  // Stable values make an ambiguous commit verifiable without overwriting it.
+  const state = { finished_at: Date.now(), ok: ok ? 1 : 0, item_count: count || 0, error: ok ? null : 'WORK_FAILED' };
+  try {
+    await finishRun(env, id, state);
+    return;
+  } catch (firstError) {
+    let row;
+    try {
+      row = await env.DB.prepare('SELECT finished_at,ok,item_count,error FROM watcher_runs WHERE id=?1').bind(id).first();
+    } catch (_) {
+      throw new AggregateError([firstError, finalizationError('FINALIZE_CONFIRM_ERROR')], 'FINALIZATION_FAILED');
+    }
+    if (row && Object.keys(state).every(key => row[key] === state[key])) return;
+    if (!row || row.finished_at !== null) {
+      throw new AggregateError([firstError, finalizationError(row ? 'FINALIZE_CONFLICT' : 'FINALIZE_NO_MATCH')], 'FINALIZATION_FAILED');
+    }
+    // Exactly one retry, only after the intended row was confirmed still open.
+    try {
+      await finishRun(env, id, state);
+    } catch (retryError) {
+      throw new AggregateError([firstError, retryError], 'FINALIZATION_FAILED');
+    }
+  }
+}
+
+async function rejectWorkFailure(env, id, workError) {
+  try {
+    await safeFinishRun(env, id, false, 0);
+  } catch (finalError) {
+    // Preserve the original value as the primary cause; diagnostics never stringify it.
+    throw new AggregateError([workError, finalError], 'WORK_FAILED;FINALIZATION_FAILED', { cause: workError });
+  }
+  throw workError;
 }
 
 async function trendingWindow(env, type, hours, limit) {
@@ -352,6 +407,7 @@ async function trendingWindow(env, type, hours, limit) {
 
 async function runTrending(env, at, source = 'internal') {
   const runId = await startRun(env, 'trending', at, source);
+  let result;
   try {
     const limit = clampInt(env.TREND_LIMIT, 20, 1000, 200);
     const [a1,a3,a6,a24,d1,d6,d24] = await Promise.all([
@@ -371,12 +427,12 @@ async function runTrending(env, at, source = 'internal') {
     for (const id of ids) batch.push(stmt.bind(at,id,a1.get(id)||0,a3.get(id)||0,a6.get(id)||0,a24.get(id)||0,d1.get(id)||0,d6.get(id)||0,d24.get(id)||0));
     if (batch.length) await env.DB.batch(batch);
     await detectMarketEvents(env, at, previousAt);
-    await finishRun(env, runId, true, ids.size);
-    return { ok: true, captured_at: at, players: ids.size };
+    result = { ok: true, captured_at: at, players: ids.size };
   } catch (e) {
-    await finishRun(env, runId, false, 0, String(e?.message || e));
-    throw e;
+    return rejectWorkFailure(env, runId, e);
   }
+  await safeFinishRun(env, runId, true, result.players);
+  return result;
 }
 
 async function pruneTrendingSnapshots(env, keepFrom) {
@@ -483,6 +539,7 @@ function stateHash(s) {
 
 async function runPlayerState(env, at, source = 'internal') {
   const runId = await startRun(env, 'player_state', at, source);
+  let result;
 
   try {
     const players = await api(env, '/players/nfl');
@@ -605,12 +662,12 @@ async function runPlayerState(env, at, source = 'internal') {
       await env.DB.batch(writes.slice(i, i + BATCH_SIZE));
     }
 
-    await finishRun(env, runId, true, seen);
-    return { ok: true, captured_at: at, seen, changed };
+    result = { ok: true, captured_at: at, seen, changed };
   } catch (e) {
-    await finishRun(env, runId, false, 0, String(e?.message || e));
-    throw e;
+    return rejectWorkFailure(env, runId, e);
   }
+  await safeFinishRun(env, runId, true, result.seen);
+  return result;
 }
 
 function inferThesisLink(diffs) {
@@ -646,3 +703,4 @@ async function evidenceFingerprint(e) {
 }
 
 export { playerStateOf, trackedState, stateHash, inferThesisLink, marketSignals, evidenceFingerprint, depthChartOrderOf, normalizeRunType, normalizeRunSource, runsQuery, ownershipStatus, buildFreeAgencyRadar, resolveLeagueContext, previousTrendingSnapshotSql };
+export { safeFinishRun, runTrending, runPlayerState };
