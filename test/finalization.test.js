@@ -39,7 +39,11 @@ function database(options = {}) {
             if (options.selectError) throw options.selectError;
             return { results: options.players || [] };
           }
-          if (sql.startsWith('SELECT * FROM trending_snapshots')) return { results: args[0] === NOW ? db.snapshots : options.previous || [] };
+          if (sql.startsWith('SELECT player_id,') && sql.includes('FROM trending_snapshots WHERE captured_at=?1')) {
+            const columns = sql.slice(7, sql.indexOf(' FROM')).split(',');
+            const rows = args[0] === NOW ? db.snapshots : options.previous || [];
+            return { results: rows.map(row => Object.fromEntries(columns.map(key => [key, row[key]]))) };
+          }
           if (sql.includes('FROM evidence_events') || sql.startsWith('WITH latest AS')) return { results: [] };
           throw new Error(`Unexpected all: ${sql}`);
         },

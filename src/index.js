@@ -405,6 +405,14 @@ async function trendingWindow(env, type, hours, limit) {
   return map;
 }
 
+function collectTrendingIds(...maps) {
+  const ids = new Set();
+  for (const map of maps) {
+    for (const id of map.keys()) ids.add(id);
+  }
+  return ids;
+}
+
 async function runTrending(env, at, source = 'internal') {
   const runId = await startRun(env, 'trending', at, source);
   let result;
@@ -414,7 +422,7 @@ async function runTrending(env, at, source = 'internal') {
       trendingWindow(env,'add',1,limit), trendingWindow(env,'add',3,limit), trendingWindow(env,'add',6,limit), trendingWindow(env,'add',24,limit),
       trendingWindow(env,'drop',1,limit), trendingWindow(env,'drop',6,limit), trendingWindow(env,'drop',24,limit)
     ]);
-    const ids = new Set([...a1.keys(),...a3.keys(),...a6.keys(),...a24.keys(),...d1.keys(),...d6.keys(),...d24.keys()]);
+    const ids = collectTrendingIds(a1, a3, a6, a24, d1, d6, d24);
     // Keep only the immediately preceding capture plus the current capture. This
     // bounds both D1 storage and MAX(captured_at) reads while preserving delta signals.
     const previousAt = await latestTrendingCaptureBefore(env, at);
@@ -472,13 +480,14 @@ function previousTrendingSnapshotSql() {
 
 async function detectMarketEvents(env, at, previousAt = null) {
   const [currentResult, previousResult] = await Promise.all([
-    env.DB.prepare(`SELECT * FROM trending_snapshots WHERE captured_at=?1`).bind(at).all(),
-    previousAt === null ? Promise.resolve({ results: [] }) : env.DB.prepare(`SELECT * FROM trending_snapshots WHERE captured_at=?1`).bind(previousAt).all()
+    env.DB.prepare(`SELECT player_id,adds_1h,adds_3h,adds_24h,drops_1h,drops_6h,drops_24h FROM trending_snapshots WHERE captured_at=?1`).bind(at).all(),
+    previousAt === null ? Promise.resolve({ results: [] }) : env.DB.prepare(`SELECT player_id,adds_1h,drops_1h FROM trending_snapshots WHERE captured_at=?1`).bind(previousAt).all()
   ]);
 
-  const previous = new Map(
-    (previousResult.results || []).map(row => [String(row.player_id), row])
-  );
+  const previous = new Map();
+  for (const row of previousResult.results || []) previous.set(String(row.player_id), row);
+  let evidenceStatement;
+  const prepareEvidence = () => evidenceStatement ??= env.DB.prepare(EVIDENCE_UPSERT_SQL);
 
   for (const row of currentResult.results || []) {
     const prev = previous.get(String(row.player_id));
@@ -491,7 +500,7 @@ async function detectMarketEvents(env, at, previousAt = null) {
         player_id: row.player_id, event_type: 'MARKET_ACCELERATION', fundamental_or_market: 'market', occurred_at: at,
         first_seen_at: at, last_seen_at: at, source: 'Sleeper Trending', original_source: 'Sleeper Trending', authority: 0.95, confidence: 0.95,
         thesis_link: 'market_recognition', payload: { adds_1h: addNow, previous_adds_1h: addPrev, acceleration: accel, adds_3h: row.adds_3h, adds_24h: row.adds_24h }
-      });
+      }, prepareEvidence);
     }
 
     if (marketReversal) {
@@ -499,7 +508,7 @@ async function detectMarketEvents(env, at, previousAt = null) {
         player_id: row.player_id, event_type: 'MARKET_REVERSAL', fundamental_or_market: 'market', occurred_at: at,
         first_seen_at: at, last_seen_at: at, source: 'Sleeper Trending', original_source: 'Sleeper Trending', authority: 0.95, confidence: 0.9,
         thesis_link: 'market_recognition', payload: { drops_1h: dropNow, previous_drops_1h: dropPrev, acceleration: reversal, drops_6h: row.drops_6h, drops_24h: row.drops_24h }
-      });
+      }, prepareEvidence);
     }
   }
 }
@@ -677,14 +686,16 @@ function inferThesisLink(diffs) {
   return 'player_state';
 }
 
-async function upsertEvidence(env, e) {
-  const fingerprint = await evidenceFingerprint(e);
-  const payload = JSON.stringify(e.payload || {});
-  await env.DB.prepare(`
+const EVIDENCE_UPSERT_SQL = `
     INSERT INTO evidence_events(fingerprint,player_id,event_type,fundamental_or_market,occurred_at,first_seen_at,last_seen_at,source,original_source,authority,confidence,thesis_link,payload_json)
     VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)
     ON CONFLICT(fingerprint) DO UPDATE SET last_seen_at=excluded.last_seen_at
-  `).bind(fingerprint,e.player_id||null,e.event_type,e.fundamental_or_market,e.occurred_at||null,e.first_seen_at,e.last_seen_at,e.source,e.original_source,e.authority,e.confidence,e.thesis_link||null,payload).run();
+  `;
+
+async function upsertEvidence(env, e, prepareEvidence = () => env.DB.prepare(EVIDENCE_UPSERT_SQL)) {
+  const fingerprint = await evidenceFingerprint(e);
+  const payload = JSON.stringify(e.payload || {});
+  await prepareEvidence().bind(fingerprint,e.player_id||null,e.event_type,e.fundamental_or_market,e.occurred_at||null,e.first_seen_at,e.last_seen_at,e.source,e.original_source,e.authority,e.confidence,e.thesis_link||null,payload).run();
 }
 
 async function sha256(text) {
