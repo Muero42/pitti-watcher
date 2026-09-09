@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import worker, { safeFinishRun, runPlayerState, runTrending, playerStateOf, stateHash } from '../src/index.js';
 
 const NOW = 1788850862324;
@@ -75,7 +76,8 @@ function database(options = {}) {
       return statement();
     },
     async batch(statements) {
-      db.batches.push(statements); db.order.push('batch');
+      db.batches.push(statements);
+      db.order.push(statements.every(stmt => stmt.sql.startsWith('INSERT INTO evidence_events')) ? 'evidenceBatch' : 'batch');
       if (options.batchError && db.batches.length === (options.failBatch || 1)) throw options.batchError;
       for (const stmt of statements) {
         db.writes.push(stmt);
@@ -190,8 +192,63 @@ test('players: evidence precedes state batch, new players do not fabricate chang
   const { DB, env } = setup(t, { players: [oldPlayer] }, { 1: { ...player, team: 'BBB' }, 2: player });
   const out = await runPlayerState(env, NOW, 'scheduled');
   assert.equal(out.changed, 1); assert.equal(out.seen, 2);
-  assert.deepEqual(DB.order, ['start', 'evidence', 'batch', 'finalize']);
-  assert.equal(DB.batches[0].length, 2);
+  assert.deepEqual(DB.order, ['start', 'evidenceBatch', 'batch', 'finalize']);
+  assert.deepEqual(DB.batches.map(batch => batch.length), [1, 2]);
+});
+
+test('players: 12k-player sweep batches 1000 changes with exact evidence identity', async t => {
+  const count = 12000, changed = 1000;
+  const payload = {}, existing = [];
+  for (let i = 0; i < count; i++) {
+    const id = String(i);
+    payload[id] = i < changed ? { ...player, team: 'BBB' } : player;
+    existing.push({ ...oldPlayer, player_id:id });
+  }
+  const { DB, env } = setup(t, { players:existing }, payload);
+  const out = await runPlayerState(env, NOW, 'scheduled');
+  assert.deepEqual(out, { ok:true, captured_at:NOW, seen:count, changed });
+  const evidenceBatches = DB.batches.filter(batch => batch[0]?.sql.startsWith('INSERT INTO evidence_events'));
+  const stateBatches = DB.batches.filter(batch => !batch[0]?.sql.startsWith('INSERT INTO evidence_events'));
+  assert.deepEqual(evidenceBatches.map(x => x.length), [...Array(13).fill(75), 25]);
+  assert.deepEqual(stateBatches.map(x => x.length), [...Array(13).fill(75), 25]);
+  assert.ok(DB.batches.every(batch => batch.length <= 75));
+  assert.ok(DB.order.lastIndexOf('evidenceBatch') < DB.order.indexOf('batch'));
+
+  const first = evidenceBatches[0][0].args;
+  const expectedPayload = JSON.stringify({
+    player:'Test Player', team:'BBB', position:'RB',
+    diffs:{ team:{ before:'AAA', after:'BBB' } }
+  });
+  const expectedFingerprint = createHash('sha256')
+    .update(JSON.stringify(['0','PLAYER_STATE_CHANGED','Sleeper Player Data',JSON.parse(expectedPayload)]))
+    .digest('hex');
+  assert.deepEqual(first, [expectedFingerprint,'0','PLAYER_STATE_CHANGED','fundamental',NOW,NOW,NOW,
+    'Sleeper Player Data','Sleeper Player Data',0.75,0.8,'roster_context',expectedPayload]);
+});
+
+test('players: intermediate evidence batch failure writes no canonical state and finalizes FAIL', async t => {
+  const original = new Error('second evidence batch');
+  const payload = Object.fromEntries(Array.from({ length:151 }, (_,i) => [String(i), { ...player, team:'BBB' }]));
+  const players = Array.from({ length:151 }, (_,i) => ({ ...oldPlayer, player_id:String(i) }));
+  const { DB, env } = setup(t, { players, batchError:original, failBatch:2 }, payload);
+  await assert.rejects(runPlayerState(env, NOW, 'scheduled'), e => e === original);
+  assert.deepEqual(DB.batches.map(x => x.length), [75, 75]);
+  assert.ok(DB.writes.every(stmt => stmt.sql.startsWith('INSERT INTO evidence_events')));
+  assert.deepEqual(DB.order, ['start','evidenceBatch','evidenceBatch','finalize']);
+  assert.equal(DB.rows[0].ok, 0); assert.equal(DB.rows[0].item_count, 0);
+});
+
+test('players: intermediate state batch failure follows complete evidence persistence and finalizes FAIL', async t => {
+  const original = new Error('second state batch');
+  const payload = Object.fromEntries(Array.from({ length:80 }, (_,i) => [String(i), { ...player, team:'BBB' }]));
+  const players = Array.from({ length:80 }, (_,i) => ({ ...oldPlayer, player_id:String(i) }));
+  const { DB, env } = setup(t, { players, batchError:original, failBatch:4 }, payload);
+  await assert.rejects(runPlayerState(env, NOW, 'scheduled'), e => e === original);
+  assert.deepEqual(DB.batches.map(x => x.length), [75, 5, 75, 5]);
+  assert.deepEqual(DB.order, ['start','evidenceBatch','evidenceBatch','batch','batch','finalize']);
+  assert.equal(DB.writes.filter(stmt => stmt.sql.startsWith('INSERT INTO evidence_events')).length, 80);
+  assert.equal(DB.writes.filter(stmt => stmt.sql.startsWith('UPDATE player_state')).length, 75);
+  assert.equal(DB.rows[0].ok, 0); assert.equal(DB.rows[0].item_count, 0);
 });
 
 for (const [name, run, payload] of [['players', runPlayerState, { 1: player }], ['trending', runTrending, [{ player_id: '1', count: 30 }]]]) {
@@ -314,7 +371,7 @@ test('gate: higher scheduled IDs override older open rows; zero items remain PAS
   const body = await feed(env);
   assert.equal(body.gate.overall, 'PASS'); assert.equal(fetch.mock.callCount(), 0);
   assert.deepEqual(Object.keys(body), ['schema','generatedAt','watcherVersion','gate','league','freeAgency','events','market']);
-  assert.equal(body.schema, 'draft-companion.watcher-feed.v2'); assert.equal(body.watcherVersion, '0.2.5');
+  assert.equal(body.schema, 'draft-companion.watcher-feed.v2'); assert.equal(body.watcherVersion, '0.2.6');
   assert.deepEqual(body.gate.trending, { started_at: NOW, finished_at: NOW, ok: true, item_count: 0 });
   DB.rows.push(openRun(4, 'trending:scheduled'));
   assert.equal((await feed(env)).gate.overall, 'FAIL');

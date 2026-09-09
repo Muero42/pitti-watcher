@@ -1,6 +1,6 @@
 const HOUR = 3600_000;
 const DAY = 24 * HOUR;
-const VERSION = '0.2.5';
+const VERSION = '0.2.6';
 
 export default {
   async fetch(request, env) {
@@ -565,7 +565,9 @@ async function runPlayerState(env, at, source = 'internal') {
 
     let changed = 0;
     let seen = 0;
+    const evidenceWrites = [];
     const writes = [];
+    let evidenceStatement;
 
     for (const [id, p] of Object.entries(players || {})) {
       if (!p || !p.position) continue;
@@ -644,7 +646,8 @@ async function runPlayerState(env, at, source = 'internal') {
         )
       );
 
-      await upsertEvidence(env, {
+      evidenceStatement ??= env.DB.prepare(EVIDENCE_UPSERT_SQL);
+      evidenceWrites.push(await bindEvidence(evidenceStatement, {
         player_id: id,
         event_type: 'PLAYER_STATE_CHANGED',
         fundamental_or_market: 'fundamental',
@@ -662,11 +665,17 @@ async function runPlayerState(env, at, source = 'internal') {
           position: s.position,
           diffs
         }
-      });
+      }));
+    }
+
+    // Evidence must commit first: if a later state batch fails, the next sweep can
+    // safely retry state without losing the already-observed change event.
+    const BATCH_SIZE = 75;
+    for (let i = 0; i < evidenceWrites.length; i += BATCH_SIZE) {
+      await env.DB.batch(evidenceWrites.slice(i, i + BATCH_SIZE));
     }
 
     // Schreiboperationen gebündelt an D1 schicken.
-    const BATCH_SIZE = 75;
     for (let i = 0; i < writes.length; i += BATCH_SIZE) {
       await env.DB.batch(writes.slice(i, i + BATCH_SIZE));
     }
@@ -693,9 +702,14 @@ const EVIDENCE_UPSERT_SQL = `
   `;
 
 async function upsertEvidence(env, e, prepareEvidence = () => env.DB.prepare(EVIDENCE_UPSERT_SQL)) {
+  const statement = await bindEvidence(prepareEvidence(), e);
+  await statement.run();
+}
+
+async function bindEvidence(statement, e) {
   const fingerprint = await evidenceFingerprint(e);
   const payload = JSON.stringify(e.payload || {});
-  await prepareEvidence().bind(fingerprint,e.player_id||null,e.event_type,e.fundamental_or_market,e.occurred_at||null,e.first_seen_at,e.last_seen_at,e.source,e.original_source,e.authority,e.confidence,e.thesis_link||null,payload).run();
+  return statement.bind(fingerprint,e.player_id||null,e.event_type,e.fundamental_or_market,e.occurred_at||null,e.first_seen_at,e.last_seen_at,e.source,e.original_source,e.authority,e.confidence,e.thesis_link||null,payload);
 }
 
 async function sha256(text) {
