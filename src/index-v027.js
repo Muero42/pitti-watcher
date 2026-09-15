@@ -78,7 +78,7 @@ function jsonCors(data,status=200){
   }});
 }
 
-async function companionFeed(request,env,ctx){
+export async function companionFeed(request,env,ctx,version=VERSION){
   const [trending,playerState]=await Promise.all([
     env.DB.prepare(`SELECT run_type,started_at,finished_at,ok,item_count FROM watcher_runs WHERE run_type='trending:scheduled' ORDER BY id DESC LIMIT 1`).first(),
     env.DB.prepare(`SELECT run_type,started_at,finished_at,ok,item_count FROM watcher_runs WHERE run_type='player_state:scheduled' ORDER BY id DESC LIMIT 1`).first()
@@ -112,7 +112,7 @@ async function companionFeed(request,env,ctx){
   const freeAgency=overall==='PASS'?buildFreeAgencyRadar(events,market,league):{available:false,reason:'WATCHER_ALL_LANES_'+overall,candidates:[]};
   return jsonCors({
     schema:'draft-companion.watcher-feed.v2',
-    generatedAt:Date.now(),watcherVersion:VERSION,
+    generatedAt:Date.now(),watcherVersion:version,
     gate:{
       overall,
       market:marketStatus,

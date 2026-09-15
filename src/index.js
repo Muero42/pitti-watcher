@@ -546,6 +546,197 @@ function stateHash(s) {
   return JSON.stringify(trackedState(s));
 }
 
+const PLAYER_STATE_BATCH_SIZE = 75;
+const PLAYER_STATE_CHUNK_SIZE = 100;
+
+async function persistPlayerStateEntries(env, at, entries, existingRows) {
+  const existing = new Map((existingRows || []).map(row => [String(row.player_id), row]));
+  let changed = 0;
+  let seen = 0;
+  const evidenceWrites = [];
+  const writes = [];
+  let evidenceStatement;
+
+  for (const [id, p] of entries) {
+    if (!p || !p.position) continue;
+    seen++;
+
+    const s = playerStateOf(p);
+    const hash = stateHash(s);
+    const old = existing.get(String(id));
+
+    if (!old) {
+      writes.push(
+        env.DB.prepare(
+          `INSERT INTO player_state(
+            player_id,full_name,team,position,injury_status,
+            practice_participation,depth_chart_order,status,
+            first_seen_at,last_seen_at,state_hash
+          ) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)`
+        ).bind(
+          id, s.full_name, s.team, s.position, s.injury_status,
+          s.practice_participation, s.depth_chart_order, s.status,
+          at, at, hash
+        )
+      );
+      continue;
+    }
+
+    // Unchanged canonical state is deliberately write-free. Sweep progress lives
+    // in player_state_sweeps and is not presented as player liveness evidence.
+    if (old.state_hash === hash) continue;
+
+    changed++;
+    const diffs = {};
+    for (const k of ['team','position','injury_status','practice_participation','depth_chart_order','status']) {
+      const before = old[k] ?? null;
+      const after = s[k] ?? null;
+      if (String(before) !== String(after)) diffs[k] = { before, after };
+    }
+
+    writes.push(
+      env.DB.prepare(
+        `UPDATE player_state
+         SET full_name=?1,team=?2,position=?3,injury_status=?4,
+             practice_participation=?5,depth_chart_order=?6,status=?7,
+             last_seen_at=?8,state_hash=?9
+         WHERE player_id=?10`
+      ).bind(
+        s.full_name, s.team, s.position, s.injury_status,
+        s.practice_participation, s.depth_chart_order, s.status,
+        at, hash, id
+      )
+    );
+
+    evidenceStatement ??= env.DB.prepare(EVIDENCE_UPSERT_SQL);
+    evidenceWrites.push(await bindEvidence(evidenceStatement, {
+      player_id: id,
+      event_type: 'PLAYER_STATE_CHANGED',
+      fundamental_or_market: 'fundamental',
+      occurred_at: at,
+      first_seen_at: at,
+      last_seen_at: at,
+      source: 'Sleeper Player Data',
+      original_source: 'Sleeper Player Data',
+      authority: 0.75,
+      confidence: 0.8,
+      thesis_link: inferThesisLink(diffs),
+      payload: { player: s.full_name, team: s.team, position: s.position, diffs }
+    }));
+  }
+
+  // Evidence commits before canonical state. Retrying an uncheckpointed chunk is
+  // idempotent because evidence fingerprints encode the exact state transition.
+  for (let i = 0; i < evidenceWrites.length; i += PLAYER_STATE_BATCH_SIZE) {
+    await env.DB.batch(evidenceWrites.slice(i, i + PLAYER_STATE_BATCH_SIZE));
+  }
+  for (let i = 0; i < writes.length; i += PLAYER_STATE_BATCH_SIZE) {
+    await env.DB.batch(writes.slice(i, i + PLAYER_STATE_BATCH_SIZE));
+  }
+
+  return { seen, changed };
+}
+
+async function fetchPlayerSnapshot(env) {
+  const base = env.SLEEPER_BASE || 'https://api.sleeper.app/v1';
+  const response = await fetch(base + '/players/nfl', { headers: { 'user-agent': `PittiWatcher/${VERSION}` } });
+  if (!response.ok) throw new Error(`Sleeper /players/nfl: HTTP ${response.status}`);
+  const sourceEtag = String(response.headers?.get?.('etag') || '').trim();
+  if (!sourceEtag) throw new Error('Sleeper /players/nfl: missing ETag');
+  return { sourceEtag, players: await response.json() };
+}
+
+async function activePlayerStateSweep(env) {
+  return env.DB.prepare(`
+    SELECT s.run_id,s.source_etag,s.total_entries,s.next_index,s.seen_count,s.started_at
+    FROM player_state_sweeps s
+    JOIN watcher_runs r ON r.id=s.run_id
+    WHERE r.finished_at IS NULL
+    ORDER BY s.run_id DESC
+    LIMIT 1
+  `).first();
+}
+
+async function initializePlayerStateSweep(env, at, snapshot, source = 'scheduled', existingRunId = null) {
+  const runId = existingRunId ?? await startRun(env, 'player_state', at, source);
+  const keys = Object.keys(snapshot.players || {}).sort();
+  try {
+    const result = await env.DB.prepare(`
+      INSERT INTO player_state_sweeps(run_id,source_etag,total_entries,next_index,seen_count,started_at)
+      VALUES(?1,?2,?3,0,0,?4)
+    `).bind(runId, snapshot.sourceEtag, keys.length, at).run();
+    if (result?.success !== true || result.meta?.changes !== 1) throw new Error('PLAYER_SWEEP_INIT_FAILED');
+  } catch (error) {
+    return rejectWorkFailure(env, runId, error);
+  }
+  return processPlayerStateSweepChunk(env, {
+    run_id: runId, source_etag: snapshot.sourceEtag, total_entries: keys.length,
+    next_index: 0, seen_count: 0, started_at: at
+  }, snapshot, keys);
+}
+
+async function processPlayerStateSweepChunk(env, sweep, snapshot, sortedKeys = null) {
+  const keys = sortedKeys || Object.keys(snapshot.players || {}).sort();
+  if (snapshot.sourceEtag !== sweep.source_etag || keys.length !== Number(sweep.total_entries)) {
+    await safeFinishRun(env, Number(sweep.run_id), false, 0);
+    const at = Date.now();
+    const runId = await startRun(env, 'player_state', at, 'scheduled');
+    return initializePlayerStateSweep(env, at, snapshot, 'scheduled', runId);
+  }
+
+  const from = Number(sweep.next_index);
+  const total = Number(sweep.total_entries);
+  if (!Number.isSafeInteger(from) || from < 0 || from > total) throw new Error('PLAYER_SWEEP_CURSOR_INVALID');
+  if (from === total) {
+    await safeFinishRun(env, Number(sweep.run_id), true, Number(sweep.seen_count));
+    return { ok: true, complete: true, seen: Number(sweep.seen_count), processed: 0 };
+  }
+
+  const to = Math.min(total, from + clampInt(env.PLAYER_STATE_CHUNK_SIZE, 25, 500, PLAYER_STATE_CHUNK_SIZE));
+  const entries = keys.slice(from, to).map(id => [id, snapshot.players[id]]);
+  const eligibleIds = entries.filter(([,p]) => p?.position).map(([id]) => id);
+  let existingRows = [];
+  if (eligibleIds.length) {
+    const result = await env.DB.prepare(`
+      SELECT * FROM player_state
+      WHERE player_id>=?1 AND player_id<=?2
+    `).bind(eligibleIds[0], eligibleIds.at(-1)).all();
+    existingRows = result.results || [];
+  }
+
+  const persisted = await persistPlayerStateEntries(env, Number(sweep.started_at), entries, existingRows);
+  const checkpoint = await env.DB.prepare(`
+    UPDATE player_state_sweeps
+    SET next_index=?1,seen_count=seen_count+?2
+    WHERE run_id=?3 AND next_index=?4
+  `).bind(to, persisted.seen, sweep.run_id, from).run();
+  if (checkpoint?.success !== true || checkpoint.meta?.changes !== 1) throw new Error('PLAYER_SWEEP_CHECKPOINT_FAILED');
+
+  const seen = Number(sweep.seen_count) + persisted.seen;
+  if (to === total) await safeFinishRun(env, Number(sweep.run_id), true, seen);
+  return { ok: true, complete: to === total, seen, changed: persisted.changed, processed: to - from };
+}
+
+async function beginPlayerStateSweep(env, at = Date.now()) {
+  const prior = await activePlayerStateSweep(env);
+  if (prior) await safeFinishRun(env, Number(prior.run_id), false, 0);
+  const runId = await startRun(env, 'player_state', at, 'scheduled');
+  let snapshot;
+  try {
+    snapshot = await fetchPlayerSnapshot(env);
+  } catch (error) {
+    return rejectWorkFailure(env, runId, error);
+  }
+  return initializePlayerStateSweep(env, at, snapshot, 'scheduled', runId);
+}
+
+async function continuePlayerStateSweep(env) {
+  const sweep = await activePlayerStateSweep(env);
+  if (!sweep) return { ok: true, idle: true };
+  const snapshot = await fetchPlayerSnapshot(env);
+  return processPlayerStateSweepChunk(env, sweep, snapshot);
+}
+
 async function runPlayerState(env, at, source = 'internal') {
   const runId = await startRun(env, 'player_state', at, source);
   let result;
@@ -559,128 +750,8 @@ async function runPlayerState(env, at, source = 'internal') {
       .prepare('SELECT * FROM player_state')
       .all();
 
-    const existing = new Map(
-      (existingResult.results || []).map(row => [String(row.player_id), row])
-    );
-
-    let changed = 0;
-    let seen = 0;
-    const evidenceWrites = [];
-    const writes = [];
-    let evidenceStatement;
-
-    for (const [id, p] of Object.entries(players || {})) {
-      if (!p || !p.position) continue;
-      seen++;
-
-      const s = playerStateOf(p);
-      const hash = stateHash(s);
-      const old = existing.get(String(id));
-
-      if (!old) {
-        writes.push(
-          env.DB.prepare(
-            `INSERT INTO player_state(
-              player_id,full_name,team,position,injury_status,
-              practice_participation,depth_chart_order,status,
-              first_seen_at,last_seen_at,state_hash
-            ) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)`
-          ).bind(
-            id,
-            s.full_name,
-            s.team,
-            s.position,
-            s.injury_status,
-            s.practice_participation,
-            s.depth_chart_order,
-            s.status,
-            at,
-            at,
-            hash
-          )
-        );
-        continue;
-      }
-
-      // Unchanged state is deliberately write-free. last_seen_at is not used as
-      // liveness evidence; watcher_runs records successful full-state observations.
-      if (old.state_hash === hash) continue;
-
-      changed++;
-      const diffs = {};
-
-      for (const k of [
-        'team',
-        'position',
-        'injury_status',
-        'practice_participation',
-        'depth_chart_order',
-        'status'
-      ]) {
-        const before = old[k] ?? null;
-        const after = s[k] ?? null;
-
-        if (String(before) !== String(after)) {
-          diffs[k] = { before, after };
-        }
-      }
-
-      writes.push(
-        env.DB.prepare(
-          `UPDATE player_state
-           SET full_name=?1,team=?2,position=?3,injury_status=?4,
-               practice_participation=?5,depth_chart_order=?6,status=?7,
-               last_seen_at=?8,state_hash=?9
-           WHERE player_id=?10`
-        ).bind(
-          s.full_name,
-          s.team,
-          s.position,
-          s.injury_status,
-          s.practice_participation,
-          s.depth_chart_order,
-          s.status,
-          at,
-          hash,
-          id
-        )
-      );
-
-      evidenceStatement ??= env.DB.prepare(EVIDENCE_UPSERT_SQL);
-      evidenceWrites.push(await bindEvidence(evidenceStatement, {
-        player_id: id,
-        event_type: 'PLAYER_STATE_CHANGED',
-        fundamental_or_market: 'fundamental',
-        occurred_at: at,
-        first_seen_at: at,
-        last_seen_at: at,
-        source: 'Sleeper Player Data',
-        original_source: 'Sleeper Player Data',
-        authority: 0.75,
-        confidence: 0.8,
-        thesis_link: inferThesisLink(diffs),
-        payload: {
-          player: s.full_name,
-          team: s.team,
-          position: s.position,
-          diffs
-        }
-      }));
-    }
-
-    // Evidence must commit first: if a later state batch fails, the next sweep can
-    // safely retry state without losing the already-observed change event.
-    const BATCH_SIZE = 75;
-    for (let i = 0; i < evidenceWrites.length; i += BATCH_SIZE) {
-      await env.DB.batch(evidenceWrites.slice(i, i + BATCH_SIZE));
-    }
-
-    // Schreiboperationen gebündelt an D1 schicken.
-    for (let i = 0; i < writes.length; i += BATCH_SIZE) {
-      await env.DB.batch(writes.slice(i, i + BATCH_SIZE));
-    }
-
-    result = { ok: true, captured_at: at, seen, changed };
+    const persisted = await persistPlayerStateEntries(env, at, Object.entries(players || {}), existingResult.results || []);
+    result = { ok: true, captured_at: at, seen: persisted.seen, changed: persisted.changed };
   } catch (e) {
     return rejectWorkFailure(env, runId, e);
   }
@@ -728,4 +799,4 @@ async function evidenceFingerprint(e) {
 }
 
 export { playerStateOf, trackedState, stateHash, inferThesisLink, marketSignals, evidenceFingerprint, depthChartOrderOf, normalizeRunType, normalizeRunSource, runsQuery, ownershipStatus, buildFreeAgencyRadar, resolveLeagueContext, previousTrendingSnapshotSql };
-export { safeFinishRun, runTrending, runPlayerState };
+export { safeFinishRun, runTrending, runPlayerState, beginPlayerStateSweep, continuePlayerStateSweep };
