@@ -1,10 +1,10 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "pitti-watcher",
-  "main": "src/index-v027.js",
+  "main": "src/index-v028.js",
   "compatibility_date": "2026-08-10",
   "triggers": {
-    "crons": ["*/15 * * * *", "17 4 * * *"]
+    "crons": ["*/15 * * * *", "17 4 * * *", "2,7,12,22,37,52 * * * *"]
   },
   "d1_databases": [
     {
