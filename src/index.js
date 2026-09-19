@@ -547,7 +547,7 @@ function stateHash(s) {
 }
 
 const PLAYER_STATE_BATCH_SIZE = 75;
-const PLAYER_STATE_CHUNK_SIZE = 100;
+const PLAYER_STATE_SCOPES = Object.freeze(['QB','RB','WR','TE','K']);
 
 async function persistPlayerStateEntries(env, at, entries, existingRows) {
   const existing = new Map((existingRows || []).map(row => [String(row.player_id), row]));
@@ -582,8 +582,6 @@ async function persistPlayerStateEntries(env, at, entries, existingRows) {
       continue;
     }
 
-    // Unchanged canonical state is deliberately write-free. Sweep progress lives
-    // in player_state_sweeps and is not presented as player liveness evidence.
     if (old.state_hash === hash) continue;
 
     changed++;
@@ -625,8 +623,6 @@ async function persistPlayerStateEntries(env, at, entries, existingRows) {
     }));
   }
 
-  // Evidence commits before canonical state. Retrying an uncheckpointed chunk is
-  // idempotent because evidence fingerprints encode the exact state transition.
   for (let i = 0; i < evidenceWrites.length; i += PLAYER_STATE_BATCH_SIZE) {
     await env.DB.batch(evidenceWrites.slice(i, i + PLAYER_STATE_BATCH_SIZE));
   }
@@ -637,13 +633,24 @@ async function persistPlayerStateEntries(env, at, entries, existingRows) {
   return { seen, changed };
 }
 
-async function fetchPlayerSnapshot(env) {
+function playerScopePath(scope) {
+  return `/players/nfl?position=${encodeURIComponent(scope)}`;
+}
+
+async function fetchPlayerScope(env, scope, expectedEtag = null, parseBody = true) {
   const base = env.SLEEPER_BASE || 'https://api.sleeper.app/v1';
-  const response = await fetch(base + '/players/nfl', { headers: { 'user-agent': `PittiWatcher/${VERSION}` } });
-  if (!response.ok) throw new Error(`Sleeper /players/nfl: HTTP ${response.status}`);
+  const headers = { 'user-agent': `PittiWatcher/${VERSION}` };
+  if (expectedEtag) headers['if-none-match'] = expectedEtag;
+  const response = await fetch(base + playerScopePath(scope), { headers, cache: 'no-store' });
+  if (response.status === 304) return { unchanged: true, sourceEtag: expectedEtag, players: null };
+  if (!response.ok) throw new Error(`Sleeper ${playerScopePath(scope)}: HTTP ${response.status}`);
   const sourceEtag = String(response.headers?.get?.('etag') || '').trim();
-  if (!sourceEtag) throw new Error('Sleeper /players/nfl: missing ETag');
-  return { sourceEtag, players: await response.json() };
+  if (!sourceEtag) throw new Error(`Sleeper ${playerScopePath(scope)}: missing ETag`);
+  if (!parseBody) {
+    try { await response.body?.cancel?.(); } catch (_) {}
+    return { unchanged: sourceEtag === expectedEtag, sourceEtag, players: null };
+  }
+  return { unchanged: sourceEtag === expectedEtag, sourceEtag, players: await response.json() };
 }
 
 async function activePlayerStateSweep(env) {
@@ -657,84 +664,115 @@ async function activePlayerStateSweep(env) {
   `).first();
 }
 
-async function initializePlayerStateSweep(env, at, snapshot, source = 'scheduled', existingRunId = null) {
+async function initializePlayerStateSweep(env, at, source = 'scheduled', existingRunId = null) {
   const runId = existingRunId ?? await startRun(env, 'player_state', at, source);
-  const keys = Object.keys(snapshot.players || {}).sort();
   try {
     const result = await env.DB.prepare(`
       INSERT INTO player_state_sweeps(run_id,source_etag,total_entries,next_index,seen_count,started_at)
       VALUES(?1,?2,?3,0,0,?4)
-    `).bind(runId, snapshot.sourceEtag, keys.length, at).run();
+    `).bind(runId, '{}', PLAYER_STATE_SCOPES.length, at).run();
     if (result?.success !== true || result.meta?.changes !== 1) throw new Error('PLAYER_SWEEP_INIT_FAILED');
   } catch (error) {
     return rejectWorkFailure(env, runId, error);
   }
-  return processPlayerStateSweepChunk(env, {
-    run_id: runId, source_etag: snapshot.sourceEtag, total_entries: keys.length,
+  return processPlayerStateSweepScope(env, {
+    run_id: runId, source_etag: '{}', total_entries: PLAYER_STATE_SCOPES.length,
     next_index: 0, seen_count: 0, started_at: at
-  }, snapshot, keys);
+  });
 }
 
-async function processPlayerStateSweepChunk(env, sweep, snapshot, sortedKeys = null) {
-  const keys = sortedKeys || Object.keys(snapshot.players || {}).sort();
-  if (snapshot.sourceEtag !== sweep.source_etag || keys.length !== Number(sweep.total_entries)) {
-    await safeFinishRun(env, Number(sweep.run_id), false, 0);
-    const at = Date.now();
-    const runId = await startRun(env, 'player_state', at, 'scheduled');
-    return initializePlayerStateSweep(env, at, snapshot, 'scheduled', runId);
+function parseSweepEtags(raw) {
+  try {
+    const value = JSON.parse(String(raw || '{}'));
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  } catch (_) {
+    throw new Error('PLAYER_SWEEP_ETAGS_INVALID');
   }
+}
 
-  const from = Number(sweep.next_index);
-  const total = Number(sweep.total_entries);
-  if (!Number.isSafeInteger(from) || from < 0 || from > total) throw new Error('PLAYER_SWEEP_CURSOR_INVALID');
-  if (from === total) {
+async function loadExistingPlayerRows(env, ids) {
+  if (!ids.length) return [];
+  const rows = [];
+  for (let i = 0; i < ids.length; i += 100) {
+    const slice = ids.slice(i, i + 100);
+    const placeholders = slice.map((_, j) => `?${j + 1}`).join(',');
+    const result = await env.DB.prepare(
+      `SELECT * FROM player_state WHERE player_id IN (${placeholders})`
+    ).bind(...slice).all();
+    rows.push(...(result.results || []));
+  }
+  return rows;
+}
+
+async function revalidatePlayerStateScopes(env, etags) {
+  for (const scope of PLAYER_STATE_SCOPES) {
+    const expected = String(etags[scope] || '');
+    if (!expected) return false;
+    const check = await fetchPlayerScope(env, scope, expected, false);
+    if (!check.unchanged || check.sourceEtag !== expected) return false;
+  }
+  return true;
+}
+
+async function processPlayerStateSweepScope(env, sweep) {
+  const index = Number(sweep.next_index);
+  if (!Number.isSafeInteger(index) || index < 0 || index > PLAYER_STATE_SCOPES.length) {
+    throw new Error('PLAYER_SWEEP_CURSOR_INVALID');
+  }
+  const etags = parseSweepEtags(sweep.source_etag);
+
+  if (index === PLAYER_STATE_SCOPES.length) {
+    const coherent = await revalidatePlayerStateScopes(env, etags);
+    if (!coherent) {
+      await safeFinishRun(env, Number(sweep.run_id), false, 0);
+      return initializePlayerStateSweep(env, Date.now(), 'scheduled');
+    }
     await safeFinishRun(env, Number(sweep.run_id), true, Number(sweep.seen_count));
     return { ok: true, complete: true, seen: Number(sweep.seen_count), processed: 0 };
   }
 
-  const to = Math.min(total, from + clampInt(env.PLAYER_STATE_CHUNK_SIZE, 25, 500, PLAYER_STATE_CHUNK_SIZE));
-  const entries = keys.slice(from, to).map(id => [id, snapshot.players[id]]);
-  const eligibleIds = entries.filter(([,p]) => p?.position).map(([id]) => id);
-  let existingRows = [];
-  if (eligibleIds.length) {
-    const result = await env.DB.prepare(`
-      SELECT * FROM player_state
-      WHERE player_id>=?1 AND player_id<=?2
-    `).bind(eligibleIds[0], eligibleIds.at(-1)).all();
-    existingRows = result.results || [];
-  }
-
+  const scope = PLAYER_STATE_SCOPES[index];
+  const snapshot = await fetchPlayerScope(env, scope);
+  const entries = Object.entries(snapshot.players || {}).sort(([a],[b]) => a.localeCompare(b));
+  const eligibleIds = entries.filter(([,p]) => p?.position).map(([id]) => String(id));
+  const existingRows = await loadExistingPlayerRows(env, eligibleIds);
   const persisted = await persistPlayerStateEntries(env, Number(sweep.started_at), entries, existingRows);
+
+  etags[scope] = snapshot.sourceEtag;
+  const nextIndex = index + 1;
   const checkpoint = await env.DB.prepare(`
     UPDATE player_state_sweeps
-    SET next_index=?1,seen_count=seen_count+?2
-    WHERE run_id=?3 AND next_index=?4
-  `).bind(to, persisted.seen, sweep.run_id, from).run();
-  if (checkpoint?.success !== true || checkpoint.meta?.changes !== 1) throw new Error('PLAYER_SWEEP_CHECKPOINT_FAILED');
+    SET next_index=?1,seen_count=seen_count+?2,source_etag=?3
+    WHERE run_id=?4 AND next_index=?5
+  `).bind(nextIndex, persisted.seen, JSON.stringify(etags), sweep.run_id, index).run();
+  if (checkpoint?.success !== true || checkpoint.meta?.changes !== 1) {
+    throw new Error('PLAYER_SWEEP_CHECKPOINT_FAILED');
+  }
 
-  const seen = Number(sweep.seen_count) + persisted.seen;
-  if (to === total) await safeFinishRun(env, Number(sweep.run_id), true, seen);
-  return { ok: true, complete: to === total, seen, changed: persisted.changed, processed: to - from };
+  return {
+    ok: true,
+    complete: false,
+    scope,
+    seen: Number(sweep.seen_count) + persisted.seen,
+    changed: persisted.changed,
+    processed: entries.length
+  };
 }
 
 async function beginPlayerStateSweep(env, at = Date.now()) {
   const prior = await activePlayerStateSweep(env);
   if (prior) await safeFinishRun(env, Number(prior.run_id), false, 0);
-  const runId = await startRun(env, 'player_state', at, 'scheduled');
-  let snapshot;
-  try {
-    snapshot = await fetchPlayerSnapshot(env);
-  } catch (error) {
-    return rejectWorkFailure(env, runId, error);
-  }
-  return initializePlayerStateSweep(env, at, snapshot, 'scheduled', runId);
+  return initializePlayerStateSweep(env, at, 'scheduled');
 }
 
 async function continuePlayerStateSweep(env) {
   const sweep = await activePlayerStateSweep(env);
   if (!sweep) return { ok: true, idle: true };
-  const snapshot = await fetchPlayerSnapshot(env);
-  return processPlayerStateSweepChunk(env, sweep, snapshot);
+  try {
+    return await processPlayerStateSweepScope(env, sweep);
+  } catch (error) {
+    return rejectWorkFailure(env, Number(sweep.run_id), error);
+  }
 }
 
 async function runPlayerState(env, at, source = 'internal') {
