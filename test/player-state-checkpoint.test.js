@@ -5,27 +5,29 @@ import {runLaneStatus,overallLaneGate} from '../src/index-v027.js';
 import v028Worker,{PLAYER_STATE_CONTINUATION_CRON} from '../src/index-v028.js';
 
 const NOW=1789490000000;
-const oldPlayer={full_name:'Player',position:'RB',team:'AAA'};
+const SCOPES=['QB','RB','WR','TE','K'];
+const oldPlayer={full_name:'Player',position:'QB',fantasy_positions:['QB'],team:'AAA'};
 const changedPlayer={...oldPlayer,team:'BBB'};
 const rowFor=(id,p=oldPlayer)=>({player_id:String(id),...playerStateOf(p),state_hash:stateHash(playerStateOf(p)),first_seen_at:NOW-1,last_seen_at:NOW-1});
 const success=(changes=1)=>({success:true,meta:{changes}});
 
-function fixture(t,{count=30,changed=count,chunkSize=25,failStateOnce=false,failFinalize=false}={}){
+function fixture(t,{count=30,changed=count,failStateOnce=false,failFinalize=false}={}){
   t.mock.method(Date,'now',()=>NOW);
   const state=new Map();
-  const payload={};
+  const qbPayload={};
   for(let i=0;i<count;i++){
     const id=String(i).padStart(4,'0');
     state.set(id,rowFor(id));
-    payload[id]=i<changed?changedPlayer:oldPlayer;
+    qbPayload[id]=i<changed?changedPlayer:oldPlayer;
   }
+  const payloads={QB:qbPayload,RB:{},WR:{},TE:{},K:{}};
   const runs=[];
   const sweeps=new Map();
   const evidence=new Map();
-  const calls={order:[],evidenceAttempts:0,stateAttempts:0};
-  let etag='"snapshot-a"';
+  const calls={order:[],evidenceAttempts:0,stateAttempts:0,fetches:[]};
   let failState=failStateOnce;
   let failFinish=failFinalize;
+  const etags=Object.fromEntries(SCOPES.map(scope=>[scope,`"snapshot-${scope}"`]));
 
   const DB={
     prepare(raw){
@@ -46,8 +48,9 @@ function fixture(t,{count=30,changed=count,chunkSize=25,failStateOnce=false,fail
           throw new Error(`Unexpected first: ${sql}`);
         },
         async all(){
-          if(sql.startsWith('SELECT * FROM player_state WHERE player_id>=?1')){
-            return{results:[...state.values()].filter(row=>row.player_id>=args[0]&&row.player_id<=args[1])};
+          if(sql.startsWith('SELECT * FROM player_state WHERE player_id IN')){
+            const ids=new Set(args.map(String));
+            return{results:[...state.values()].filter(row=>ids.has(String(row.player_id)))};
           }
           throw new Error(`Unexpected all: ${sql}`);
         },
@@ -57,9 +60,9 @@ function fixture(t,{count=30,changed=count,chunkSize=25,failStateOnce=false,fail
             sweeps.set(sweep.run_id,sweep);calls.order.push('init');return success();
           }
           if(sql.startsWith('UPDATE player_state_sweeps')){
-            const sweep=sweeps.get(args[2]);
-            if(!sweep||sweep.next_index!==args[3])return success(0);
-            sweep.next_index=args[0];sweep.seen_count+=args[1];calls.order.push('checkpoint');return success();
+            const sweep=sweeps.get(args[3]);
+            if(!sweep||sweep.next_index!==args[4])return success(0);
+            sweep.next_index=args[0];sweep.seen_count+=args[1];sweep.source_etag=args[2];calls.order.push('checkpoint');return success();
           }
           if(sql.startsWith('UPDATE watcher_runs')){
             calls.order.push(args[1]===1?'pass':'fail');
@@ -98,78 +101,94 @@ function fixture(t,{count=30,changed=count,chunkSize=25,failStateOnce=false,fail
       return statements.map(()=>success());
     }
   };
-  t.mock.method(globalThis,'fetch',async()=>({ok:true,headers:new Headers({etag}),json:async()=>payload}));
+
+  t.mock.method(globalThis,'fetch',async(input,init={})=>{
+    const url=new URL(String(input));
+    const scope=url.searchParams.get('position');
+    assert.ok(SCOPES.includes(scope),`unexpected unbounded Sleeper request: ${url}`);
+    calls.fetches.push({scope,conditional:!!init.headers?.['if-none-match']});
+    const etag=etags[scope];
+    if(init.headers?.['if-none-match']===etag)return new Response(null,{status:304,headers:{etag}});
+    return new Response(JSON.stringify(payloads[scope]),{status:200,headers:{'content-type':'application/json',etag}});
+  });
+
   return{
-    env:{DB,PLAYER_STATE_CHUNK_SIZE:String(chunkSize)},runs,sweeps,evidence,state,calls,payload,
-    setEtag(value){etag=value;},setFailFinalize(value){failFinish=value;}
+    env:{DB},runs,sweeps,evidence,state,calls,payloads,etags,
+    setEtag(scope,value){etags[scope]=value;},
+    setFailFinalize(value){failFinish=value;}
   };
 }
 
-test('bounded chunks remain FAIL until the complete coherent observation becomes PASS',async t=>{
-  const f=fixture(t,{count:30,changed:30});
+async function finishSweep(env){
+  let out;
+  for(let i=0;i<5;i++)out=await continuePlayerStateSweep(env);
+  return out;
+}
+
+test('production path processes one documented Sleeper position scope per invocation',async t=>{
+  const f=fixture(t,{count:12000,changed:0});
   const first=await beginPlayerStateSweep(f.env,NOW);
-  assert.deepEqual({complete:first.complete,processed:first.processed,seen:first.seen},{complete:false,processed:25,seen:25});
-  assert.equal(runLaneStatus(f.runs[0],36*3600000,NOW),'FAIL');
-  assert.equal(overallLaneGate('PASS','FAIL'),'PASS');
-  const done=await continuePlayerStateSweep(f.env);
-  assert.deepEqual({complete:done.complete,processed:done.processed,seen:done.seen},{complete:true,processed:5,seen:30});
-  assert.equal(runLaneStatus(f.runs[0],36*3600000,NOW),'PASS');
-  assert.equal(f.runs[0].item_count,30);
-  assert.deepEqual(f.calls.order,['start','init','evidence','state','checkpoint','evidence','state','checkpoint','pass']);
+  assert.equal(first.scope,'QB');
+  assert.equal(first.complete,false);
+  assert.deepEqual(f.calls.fetches.map(x=>x.scope),['QB']);
+  assert.equal(f.sweeps.get(1).next_index,1);
+  assert.equal(f.runs[0].finished_at,null);
 });
 
-test('the production-sized 12k payload prepares at most one bounded chunk',async t=>{
-  const f=fixture(t,{count:12000,changed:12000,chunkSize:100});
-  const first=await beginPlayerStateSweep(f.env,NOW);
-  assert.deepEqual({complete:first.complete,processed:first.processed,seen:first.seen},{complete:false,processed:100,seen:100});
-  assert.equal(f.calls.evidenceAttempts,100);
-  assert.equal(f.calls.stateAttempts,100);
-  assert.deepEqual([...f.sweeps.values()].map(s=>[s.next_index,s.total_entries]),[[100,12000]]);
-  assert.equal(f.runs[0].finished_at,null);
+test('complete multi-scope observation remains fail-closed until ETags revalidate',async t=>{
+  const f=fixture(t,{count:30,changed:30});
+  await beginPlayerStateSweep(f.env,NOW);
+  assert.equal(runLaneStatus(f.runs[0],36*3600000,NOW),'FAIL');
+  assert.equal(overallLaneGate('PASS','FAIL'),'PASS');
+  const done=await finishSweep(f.env);
+  assert.equal(done.complete,true);
+  assert.equal(f.runs[0].ok,1);
+  assert.equal(f.runs[0].item_count,30);
+  assert.deepEqual(f.calls.fetches.slice(0,5).map(x=>x.scope),SCOPES);
+  assert.deepEqual(f.calls.fetches.slice(5).map(x=>x.scope),SCOPES);
+  assert.ok(f.calls.fetches.slice(5).every(x=>x.conditional));
+});
+
+test('source rotation during final revalidation fails the partial run and starts fresh',async t=>{
+  const f=fixture(t,{count:2,changed:0});
+  await beginPlayerStateSweep(f.env,NOW);
+  for(let i=0;i<4;i++)await continuePlayerStateSweep(f.env);
+  f.setEtag('WR','"snapshot-WR-rotated"');
+  const rotated=await continuePlayerStateSweep(f.env);
+  assert.equal(f.runs[0].ok,0);
+  assert.equal(f.runs[0].error,'WORK_FAILED');
+  assert.equal(f.runs[1].finished_at,null);
+  assert.equal(rotated.scope,'QB');
 });
 
 test('retry after evidence commit is idempotent and preserves evidence-before-state ordering',async t=>{
   const f=fixture(t,{count:30,changed:30,failStateOnce:true});
   await assert.rejects(beginPlayerStateSweep(f.env,NOW),/synthetic state failure/);
   assert.equal(f.sweeps.get(1).next_index,0);
-  assert.equal(f.evidence.size,25);
-  assert.equal(runLaneStatus(f.runs[0],36*3600000,NOW),'FAIL');
-  await continuePlayerStateSweep(f.env);
-  assert.equal(f.evidence.size,25);
-  assert.equal(f.calls.evidenceAttempts,50);
-  assert.ok(f.calls.order.indexOf('evidence')<f.calls.order.indexOf('state'));
+  assert.equal(f.evidence.size,30);
   await continuePlayerStateSweep(f.env);
   assert.equal(f.evidence.size,30);
-  assert.equal(f.runs[0].ok,1);
+  assert.equal(f.calls.evidenceAttempts,60);
+  assert.ok(f.calls.order.indexOf('evidence')<f.calls.order.indexOf('state'));
 });
 
-test('unchanged canonical player states stay write-free while checkpoints advance',async t=>{
+test('unchanged canonical player states stay write-free while source checkpoints advance',async t=>{
   const f=fixture(t,{count:30,changed:0});
   await beginPlayerStateSweep(f.env,NOW);
-  await continuePlayerStateSweep(f.env);
+  await finishSweep(f.env);
   assert.equal(f.calls.evidenceAttempts,0);
   assert.equal(f.calls.stateAttempts,0);
   assert.equal(f.runs[0].ok,1);
 });
 
-test('ETag change fails the partial run and starts a fresh coherent observation',async t=>{
-  const f=fixture(t,{count:30,changed:30});
+test('finalization failure leaves a fully revalidated sweep fail-closed and retryable',async t=>{
+  const f=fixture(t,{count:1,changed:0});
   await beginPlayerStateSweep(f.env,NOW);
-  f.setEtag('"snapshot-b"');
-  const rotated=await continuePlayerStateSweep(f.env);
-  assert.equal(f.runs[0].ok,0);
-  assert.equal(f.runs[0].error,'WORK_FAILED');
-  assert.equal(f.runs[1].finished_at,null);
-  assert.equal(f.sweeps.get(2).source_etag,'"snapshot-b"');
-  assert.equal(rotated.complete,false);
-});
-
-test('finalization failure leaves the complete checkpoint fail-closed and retryable',async t=>{
-  const f=fixture(t,{count:1,changed:0,failFinalize:true});
-  await assert.rejects(beginPlayerStateSweep(f.env,NOW),/FINALIZATION_FAILED/);
-  assert.equal(f.sweeps.get(1).next_index,1);
+  for(let i=0;i<4;i++)await continuePlayerStateSweep(f.env);
+  f.setFailFinalize(true);
+  await assert.rejects(continuePlayerStateSweep(f.env),/FINALIZATION_FAILED/);
+  assert.equal(f.sweeps.get(1).next_index,5);
   assert.equal(f.runs[0].finished_at,null);
-  assert.equal(runLaneStatus(f.runs[0],36*3600000,NOW),'FAIL');
   f.setFailFinalize(false);
   const retried=await continuePlayerStateSweep(f.env);
   assert.equal(retried.complete,true);
@@ -187,12 +206,12 @@ test('v0.2.8 schedules begin and continuation as separate invocations',async t=>
   await v028Worker.scheduled({cron:'17 4 * * *'},f.env,{waitUntil(p){first.push(p);}});
   assert.equal(first.length,1);
   await first[0];
-  assert.equal(f.sweeps.get(1).next_index,25);
+  assert.equal(f.sweeps.get(1).next_index,1);
   const next=[];
   await v028Worker.scheduled({cron:PLAYER_STATE_CONTINUATION_CRON},f.env,{waitUntil(p){next.push(p);}});
   assert.equal(next.length,1);
   await next[0];
-  assert.equal(f.runs[0].ok,1);
+  assert.equal(f.sweeps.get(1).next_index,2);
 });
 
 test('v0.2.8 health reports the repaired entrypoint version',async()=>{
