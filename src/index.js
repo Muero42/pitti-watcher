@@ -2,6 +2,53 @@ const HOUR = 3600_000;
 const DAY = 24 * HOUR;
 const VERSION = '0.2.6';
 
+function d1PhaseMeta(value) {
+  const results = Array.isArray(value) ? value : [value];
+  const totals = { query_count: 0, rows_read: 0, rows_written: 0, sql_ms: 0 };
+  let observed = false;
+  for (const result of results) {
+    const meta = result?.meta;
+    if (!meta) continue;
+    const rowsRead = Number(meta.rows_read);
+    const rowsWritten = Number(meta.rows_written);
+    const sqlMs = Number(meta.timings?.sql_duration_ms ?? meta.duration);
+    if (Number.isFinite(rowsRead)) totals.rows_read += rowsRead;
+    if (Number.isFinite(rowsWritten)) totals.rows_written += rowsWritten;
+    if (Number.isFinite(sqlMs)) totals.sql_ms += sqlMs;
+    totals.query_count++;
+    observed = true;
+  }
+  return observed ? totals : {};
+}
+
+function phaseErrorCode(error) {
+  const raw = String(error?.code || error?.message || 'PHASE_FAILED').toUpperCase();
+  const normalized = raw.replace(/[^A-Z0-9_:-]/g, '_').slice(0, 64);
+  return normalized || 'PHASE_FAILED';
+}
+
+async function runPhase(env, lane, phase, context, work) {
+  const enabled = String(env.PHASE_LOGGING || '') === '1';
+  const started = performance.now();
+  if (enabled) console.log(JSON.stringify({ event: 'watcher_phase', lane, phase, state: 'start', ...context }));
+  try {
+    const result = await work();
+    if (enabled) console.log(JSON.stringify({
+      event: 'watcher_phase', lane, phase, state: 'ok',
+      wall_ms: Math.round((performance.now() - started) * 1000) / 1000,
+      ...d1PhaseMeta(result), ...context
+    }));
+    return result;
+  } catch (error) {
+    if (enabled) console.log(JSON.stringify({
+      event: 'watcher_phase', lane, phase, state: 'fail',
+      wall_ms: Math.round((performance.now() - started) * 1000) / 1000,
+      error_code: phaseErrorCode(error), ...context
+    }));
+    throw error;
+  }
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -521,6 +568,180 @@ function marketSignals(row, prev) {
   return { addNow, addPrev, dropNow, dropPrev, accel, reversal, marketAcceleration: addNow >= 25 && accel >= 15, marketReversal: dropNow >= 20 && reversal >= 12 };
 }
 
+function trendingRows(ids, windows) {
+  const { a1, a3, a6, a24, d1, d6, d24 } = windows;
+  return [...ids].map(player_id => ({
+    player_id,
+    adds_1h: a1.get(player_id) || 0,
+    adds_3h: a3.get(player_id) || 0,
+    adds_6h: a6.get(player_id) || 0,
+    adds_24h: a24.get(player_id) || 0,
+    drops_1h: d1.get(player_id) || 0,
+    drops_6h: d6.get(player_id) || 0,
+    drops_24h: d24.get(player_id) || 0
+  }));
+}
+
+function parseTrendingFrame(row) {
+  if (!row) return { captured_at: null, rows: [] };
+  let rows;
+  try { rows = JSON.parse(String(row.frame_json || '[]')); }
+  catch (_) { throw new Error('TRENDING_FRAME_INVALID'); }
+  if (!Array.isArray(rows) || rows.length !== Number(row.player_count)) throw new Error('TRENDING_FRAME_INVALID');
+  return { captured_at: Number(row.captured_at), rows };
+}
+
+function marketSignalLevel(signalType, row, previous) {
+  if (!previous) return 0;
+  const addNow = Number(row?.adds_1h || 0), addPrev = Number(previous?.adds_1h || 0);
+  const dropNow = Number(row?.drops_1h || 0), dropPrev = Number(previous?.drops_1h || 0);
+  if (signalType === 'acceleration') {
+    const delta = addNow - addPrev;
+    if (addNow >= 100 && delta >= 60) return 3;
+    if (addNow >= 50 && delta >= 30) return 2;
+    if (addNow >= 25 && delta >= 15) return 1;
+    return 0;
+  }
+  const delta = dropNow - dropPrev;
+  if (dropNow >= 80 && delta >= 48) return 3;
+  if (dropNow >= 40 && delta >= 24) return 2;
+  if (dropNow >= 20 && delta >= 12) return 1;
+  return 0;
+}
+
+function marketTransitionPlan(currentRows, previousRows, storedSignals, at) {
+  const current = new Map((currentRows || []).map(row => [String(row.player_id), row]));
+  const previous = new Map((previousRows || []).map(row => [String(row.player_id), row]));
+  const stored = new Map((storedSignals || []).map(row => [`${row.player_id}:${row.signal_type}`, row]));
+  const playerIds = new Set([...current.keys(), ...(storedSignals || []).map(row => String(row.player_id))]);
+  const events = [];
+  const stateChanges = [];
+
+  for (const playerId of playerIds) {
+    const row = current.get(playerId) || { player_id: playerId };
+    const priorFrame = previous.get(playerId);
+    for (const signalType of ['acceleration', 'reversal']) {
+      const key = `${playerId}:${signalType}`;
+      const old = stored.get(key) || null;
+      const level = current.has(playerId) ? marketSignalLevel(signalType, row, priorFrame) : 0;
+      if (!old && level === 0) continue;
+
+      const episodeStartedAt = old ? Number(old.episode_started_at) : at;
+      let transition = null;
+      if (!old && level > 0) transition = 'STARTED';
+      else if (old && level === 0) transition = 'ENDED';
+      else if (old && level > Number(old.level)) transition = 'LEVEL_UP';
+
+      if (!old || level !== Number(old.level)) {
+        stateChanges.push({
+          action: level === 0 ? 'delete' : 'upsert',
+          player_id: playerId, signal_type: signalType, level,
+          episode_started_at: episodeStartedAt, last_transition_at: at
+        });
+      }
+      if (!transition) continue;
+
+      const addNow = Number(row.adds_1h || 0), addPrev = Number(priorFrame?.adds_1h || 0);
+      const dropNow = Number(row.drops_1h || 0), dropPrev = Number(priorFrame?.drops_1h || 0);
+      const prefix = signalType === 'acceleration' ? 'MARKET_ACCELERATION' : 'MARKET_REVERSAL';
+      events.push({
+        player_id: playerId,
+        event_type: `${prefix}_${transition}`,
+        fundamental_or_market: 'market', occurred_at: at,
+        first_seen_at: at, last_seen_at: at,
+        source: 'Sleeper Trending', original_source: 'Sleeper Trending',
+        authority: 0.95, confidence: signalType === 'acceleration' ? 0.95 : 0.9,
+        thesis_link: 'market_recognition',
+        transition_key: `${signalType}:${episodeStartedAt}:${transition}:${level}`,
+        payload: {
+          signal_type: signalType, transition, level,
+          adds_1h: addNow, previous_adds_1h: addPrev, add_acceleration: addNow - addPrev,
+          drops_1h: dropNow, previous_drops_1h: dropPrev, drop_acceleration: dropNow - dropPrev
+        }
+      });
+    }
+  }
+  return { events, stateChanges };
+}
+
+async function runStatementBatches(env, lane, phase, context, statements, size = 75) {
+  const results = [];
+  await runPhase(env, lane, phase, context, async () => {
+    for (let i = 0; i < statements.length; i += size) {
+      results.push(...await env.DB.batch(statements.slice(i, i + size)));
+    }
+    return results;
+  });
+  return results;
+}
+
+async function runTrendingFrames(env, at, source = 'internal') {
+  const runId = await startRun(env, 'trending', at, source);
+  const context = { run_id: runId };
+  try {
+    const limit = clampInt(env.TREND_LIMIT, 20, 1000, 200);
+    const [a1,a3,a6,a24,d1,d6,d24] = await runPhase(env, 'market', 'source.fetch', context, () => Promise.all([
+      trendingWindow(env,'add',1,limit), trendingWindow(env,'add',3,limit), trendingWindow(env,'add',6,limit), trendingWindow(env,'add',24,limit),
+      trendingWindow(env,'drop',1,limit), trendingWindow(env,'drop',6,limit), trendingWindow(env,'drop',24,limit)
+    ]));
+    const ids = collectTrendingIds(a1, a3, a6, a24, d1, d6, d24);
+    const rows = trendingRows(ids, { a1, a3, a6, a24, d1, d6, d24 });
+    const [previousFrameResult, signalResult] = await runPhase(env, 'market', 'state.load', context, () => Promise.all([
+      env.DB.prepare(`SELECT captured_at,player_count,frame_json FROM trending_snapshot_frames ORDER BY captured_at DESC LIMIT 1`).all(),
+      env.DB.prepare(`SELECT player_id,signal_type,level,episode_started_at,last_transition_at FROM market_signal_state`).all()
+    ]));
+    const previousFrameRow = previousFrameResult.results?.[0] || null;
+    const previousFrame = parseTrendingFrame(previousFrameRow);
+    const plan = marketTransitionPlan(rows, previousFrame.rows, signalResult.results || [], at);
+
+    const evidence = [];
+    let evidenceStatement;
+    for (const event of plan.events) {
+      evidenceStatement ??= env.DB.prepare(EVIDENCE_UPSERT_SQL);
+      evidence.push(await bindEvidence(evidenceStatement, event));
+    }
+    const state = plan.stateChanges.map(change => change.action === 'delete'
+      ? env.DB.prepare(`DELETE FROM market_signal_state WHERE player_id=?1 AND signal_type=?2`).bind(change.player_id, change.signal_type)
+      : env.DB.prepare(`
+          INSERT INTO market_signal_state(player_id,signal_type,level,episode_started_at,last_transition_at)
+          VALUES(?1,?2,?3,?4,?5)
+          ON CONFLICT(player_id,signal_type) DO UPDATE SET
+            level=excluded.level,episode_started_at=excluded.episode_started_at,last_transition_at=excluded.last_transition_at
+        `).bind(change.player_id, change.signal_type, change.level, change.episode_started_at, change.last_transition_at));
+
+    await runPhase(env, 'market', 'frame.insert', context, () => env.DB.prepare(`
+      INSERT INTO trending_snapshot_frames(captured_at,player_count,frame_json) VALUES(?1,?2,?3)
+    `).bind(at, rows.length, JSON.stringify(rows)).run());
+    await runStatementBatches(env, 'market', 'evidence.batch', context, evidence);
+    await runStatementBatches(env, 'market', 'signal_state.batch', context, state);
+    if (previousFrame.captured_at !== null) {
+      await runPhase(env, 'market', 'retention.prune', context, () => env.DB.prepare(`
+        DELETE FROM trending_snapshot_frames
+        WHERE captured_at < ?1
+      `).bind(previousFrame.captured_at).run());
+    }
+    await safeFinishRun(env, runId, true, rows.length);
+    return { ok: true, captured_at: at, players: rows.length, transitions: plan.events.length };
+  } catch (error) {
+    return rejectWorkFailure(env, runId, error);
+  }
+}
+
+async function latestMarketFrameRows(env, limit = 50) {
+  const frame = parseTrendingFrame(await env.DB.prepare(`
+    SELECT captured_at,player_count,frame_json FROM trending_snapshot_frames ORDER BY captured_at DESC LIMIT 1
+  `).first());
+  const rows = frame.rows
+    .sort((a,b) => Number(b.adds_1h || 0)-Number(a.adds_1h || 0) || Number(b.adds_3h || 0)-Number(a.adds_3h || 0))
+    .slice(0, clampInt(limit, 1, 100, 50));
+  if (!rows.length) return [];
+  const ids = rows.map(row => String(row.player_id));
+  const placeholders = ids.map((_, index) => `?${index + 1}`).join(',');
+  const players = await env.DB.prepare(`SELECT player_id,full_name,team,position FROM player_state WHERE player_id IN (${placeholders})`).bind(...ids).all();
+  const byId = new Map((players.results || []).map(player => [String(player.player_id), player]));
+  return rows.map(row => ({ captured_at: frame.captured_at, ...row, ...(byId.get(String(row.player_id)) || { full_name: row.player_id, team: null, position: null }) }));
+}
+
 function playerStateOf(p) {
   return {
     full_name: p.full_name || [p.first_name,p.last_name].filter(Boolean).join(' ') || null,
@@ -549,7 +770,7 @@ function stateHash(s) {
 const PLAYER_STATE_BATCH_SIZE = 75;
 const PLAYER_STATE_SCOPES = Object.freeze(['QB','RB','WR','TE','K']);
 
-async function persistPlayerStateEntries(env, at, entries, existingRows) {
+async function persistPlayerStateEntries(env, at, entries, existingRows, phaseContext = null) {
   const existing = new Map((existingRows || []).map(row => [String(row.player_id), row]));
   let changed = 0;
   let seen = 0;
@@ -623,11 +844,26 @@ async function persistPlayerStateEntries(env, at, entries, existingRows) {
     }));
   }
 
-  for (let i = 0; i < evidenceWrites.length; i += PLAYER_STATE_BATCH_SIZE) {
-    await env.DB.batch(evidenceWrites.slice(i, i + PLAYER_STATE_BATCH_SIZE));
-  }
-  for (let i = 0; i < writes.length; i += PLAYER_STATE_BATCH_SIZE) {
-    await env.DB.batch(writes.slice(i, i + PLAYER_STATE_BATCH_SIZE));
+  const persistEvidence = async () => {
+    const results = [];
+    for (let i = 0; i < evidenceWrites.length; i += PLAYER_STATE_BATCH_SIZE) {
+      results.push(...await env.DB.batch(evidenceWrites.slice(i, i + PLAYER_STATE_BATCH_SIZE)));
+    }
+    return results;
+  };
+  const persistState = async () => {
+    const results = [];
+    for (let i = 0; i < writes.length; i += PLAYER_STATE_BATCH_SIZE) {
+      results.push(...await env.DB.batch(writes.slice(i, i + PLAYER_STATE_BATCH_SIZE)));
+    }
+    return results;
+  };
+  if (phaseContext) {
+    await runPhase(env, 'player_state', 'evidence.batch', phaseContext, persistEvidence);
+    await runPhase(env, 'player_state', 'state.batch', phaseContext, persistState);
+  } else {
+    await persistEvidence();
+    await persistState();
   }
 
   return { seen, changed };
@@ -827,14 +1063,136 @@ async function sha256(text) {
 }
 
 async function evidenceFingerprint(e) {
-  // Market alerts can repeat on every poll while the same surge is active. Bucket them
-  // by UTC hour so first_seen_at remains stable within the alert window. Fundamental
-  // state changes retain their exact before/after payload identity.
+  // Transition-aware market events retain one identity for a concrete episode and
+  // level change. Legacy callers keep the hourly identity until the frame path fully
+  // replaces the row-per-player deployment.
   const identity = e.fundamental_or_market === 'market'
-    ? [e.player_id, e.event_type, Math.floor(Number(e.occurred_at || e.first_seen_at) / HOUR), e.original_source]
+    ? e.transition_key
+      ? [e.player_id, e.event_type, e.transition_key, e.original_source]
+      : [e.player_id, e.event_type, Math.floor(Number(e.occurred_at || e.first_seen_at) / HOUR), e.original_source]
     : [e.player_id, e.event_type, e.original_source, e.payload];
   return sha256(JSON.stringify(identity));
 }
 
-export { playerStateOf, trackedState, stateHash, inferThesisLink, marketSignals, evidenceFingerprint, depthChartOrderOf, normalizeRunType, normalizeRunSource, runsQuery, ownershipStatus, buildFreeAgencyRadar, resolveLeagueContext, previousTrendingSnapshotSql };
-export { safeFinishRun, runTrending, runPlayerState, beginPlayerStateSweep, continuePlayerStateSweep };
+async function activeChunkedPlayerStateSweep(env) {
+  return env.DB.prepare(`
+    SELECT s.run_id,s.source_etag,s.total_entries,s.next_index,s.scope_offset,s.scope_etag,s.seen_count,s.started_at
+    FROM player_state_sweeps s
+    JOIN watcher_runs r ON r.id=s.run_id
+    WHERE r.finished_at IS NULL
+    ORDER BY s.run_id DESC
+    LIMIT 1
+  `).first();
+}
+
+async function initializeChunkedPlayerStateSweep(env, at, source = 'scheduled', existingRunId = null) {
+  const runId = existingRunId ?? await startRun(env, 'player_state', at, source);
+  try {
+    const result = await env.DB.prepare(`
+      INSERT INTO player_state_sweeps(
+        run_id,source_etag,total_entries,next_index,scope_offset,scope_etag,seen_count,started_at
+      ) VALUES(?1,?2,?3,0,0,NULL,0,?4)
+    `).bind(runId, '{}', PLAYER_STATE_SCOPES.length, at).run();
+    if (result?.success !== true || result.meta?.changes !== 1) throw new Error('PLAYER_SWEEP_INIT_FAILED');
+  } catch (error) {
+    return rejectWorkFailure(env, runId, error);
+  }
+  return processPlayerStateSweepChunk(env, {
+    run_id: runId, source_etag: '{}', total_entries: PLAYER_STATE_SCOPES.length,
+    next_index: 0, scope_offset: 0, scope_etag: null, seen_count: 0, started_at: at
+  });
+}
+
+async function processPlayerStateSweepChunk(env, sweep) {
+  const index = Number(sweep.next_index);
+  const offset = Number(sweep.scope_offset || 0);
+  if (!Number.isSafeInteger(index) || index < 0 || index > PLAYER_STATE_SCOPES.length ||
+      !Number.isSafeInteger(offset) || offset < 0) {
+    throw new Error('PLAYER_SWEEP_CURSOR_INVALID');
+  }
+  const etags = parseSweepEtags(sweep.source_etag);
+  const baseContext = { run_id: Number(sweep.run_id), scope_index: index, player_offset: offset };
+
+  if (index === PLAYER_STATE_SCOPES.length) {
+    const coherent = await runPhase(env, 'player_state', 'source.revalidate', baseContext,
+      () => revalidatePlayerStateScopes(env, etags));
+    if (!coherent) {
+      await safeFinishRun(env, Number(sweep.run_id), false, 0);
+      return initializeChunkedPlayerStateSweep(env, Date.now(), 'scheduled');
+    }
+    await safeFinishRun(env, Number(sweep.run_id), true, Number(sweep.seen_count));
+    return { ok: true, complete: true, seen: Number(sweep.seen_count), processed: 0 };
+  }
+
+  const scope = PLAYER_STATE_SCOPES[index];
+  const snapshot = await runPhase(env, 'player_state', 'source.fetch', baseContext,
+    () => fetchPlayerScope(env, scope));
+  if (offset > 0 && String(sweep.scope_etag || '') !== snapshot.sourceEtag) {
+    await safeFinishRun(env, Number(sweep.run_id), false, 0);
+    return initializeChunkedPlayerStateSweep(env, Date.now(), 'scheduled');
+  }
+
+  const entries = Object.entries(snapshot.players || {})
+    .filter(([, player]) => player?.position)
+    .sort(([a],[b]) => a.localeCompare(b));
+  if (offset > entries.length) throw new Error('PLAYER_SWEEP_OFFSET_INVALID');
+  const chunkSize = clampInt(env.PLAYER_STATE_CHUNK_SIZE, 25, 50, 40);
+  const chunk = entries.slice(offset, offset + chunkSize);
+  const context = { ...baseContext, scope, chunk_size: chunk.length };
+  const existingResult = await runPhase(env, 'player_state', 'state.load', context, async () => {
+    if (!chunk.length) return { results: [], meta: { rows_read: 0, rows_written: 0 } };
+    const ids = chunk.map(([id]) => String(id));
+    const placeholders = ids.map((_, position) => `?${position + 1}`).join(',');
+    return env.DB.prepare(`SELECT * FROM player_state WHERE player_id IN (${placeholders})`).bind(...ids).all();
+  });
+  const persisted = await persistPlayerStateEntries(
+    env, Number(sweep.started_at), chunk, existingResult.results || [], context
+  );
+
+  const scopeComplete = offset + chunk.length >= entries.length;
+  const nextIndex = scopeComplete ? index + 1 : index;
+  const nextOffset = scopeComplete ? 0 : offset + chunk.length;
+  if (scopeComplete) etags[scope] = snapshot.sourceEtag;
+  const nextScopeEtag = scopeComplete ? null : snapshot.sourceEtag;
+  await runPhase(env, 'player_state', 'checkpoint', context, async () => {
+    const checkpoint = await env.DB.prepare(`
+      UPDATE player_state_sweeps
+      SET next_index=?1,scope_offset=?2,scope_etag=?3,
+          seen_count=seen_count+?4,source_etag=?5
+      WHERE run_id=?6 AND next_index=?7 AND scope_offset=?8
+    `).bind(
+      nextIndex, nextOffset, nextScopeEtag, persisted.seen, JSON.stringify(etags),
+      sweep.run_id, index, offset
+    ).run();
+    if (checkpoint?.success !== true || checkpoint.meta?.changes !== 1) {
+      throw new Error('PLAYER_SWEEP_CHECKPOINT_FAILED');
+    }
+    return checkpoint;
+  });
+
+  return {
+    ok: true, complete: false, scope,
+    scope_index: nextIndex, player_offset: nextOffset,
+    seen: Number(sweep.seen_count) + persisted.seen,
+    changed: persisted.changed, processed: chunk.length
+  };
+}
+
+async function beginChunkedPlayerStateSweep(env, at = Date.now()) {
+  const prior = await activeChunkedPlayerStateSweep(env);
+  if (prior) await safeFinishRun(env, Number(prior.run_id), false, 0);
+  return initializeChunkedPlayerStateSweep(env, at, 'scheduled');
+}
+
+async function continueChunkedPlayerStateSweep(env) {
+  const sweep = await activeChunkedPlayerStateSweep(env);
+  if (!sweep) return { ok: true, idle: true };
+  try {
+    return await processPlayerStateSweepChunk(env, sweep);
+  } catch (error) {
+    return rejectWorkFailure(env, Number(sweep.run_id), error);
+  }
+}
+
+export { playerStateOf, trackedState, stateHash, inferThesisLink, marketSignals, marketTransitionPlan, evidenceFingerprint, depthChartOrderOf, normalizeRunType, normalizeRunSource, runsQuery, ownershipStatus, buildFreeAgencyRadar, resolveLeagueContext, previousTrendingSnapshotSql };
+export { safeFinishRun, runTrending, runTrendingFrames, latestMarketFrameRows, runPlayerState, beginPlayerStateSweep, continuePlayerStateSweep, beginChunkedPlayerStateSweep, continueChunkedPlayerStateSweep, processPlayerStateSweepChunk };

@@ -78,7 +78,7 @@ function jsonCors(data,status=200){
   }});
 }
 
-export async function companionFeed(request,env,ctx,version=VERSION){
+export async function companionFeed(request,env,ctx,version=VERSION,marketLoader=null){
   const [trending,playerState]=await Promise.all([
     env.DB.prepare(`SELECT run_type,started_at,finished_at,ok,item_count FROM watcher_runs WHERE run_type='trending:scheduled' ORDER BY id DESC LIMIT 1`).first(),
     env.DB.prepare(`SELECT run_type,started_at,finished_at,ok,item_count FROM watcher_runs WHERE run_type='player_state:scheduled' ORDER BY id DESC LIMIT 1`).first()
@@ -90,18 +90,19 @@ export async function companionFeed(request,env,ctx,version=VERSION){
   let events=[],market=[],league=null;
 
   if(overall==='PASS'){
-    const queries=[];
-    queries.push(env.DB.prepare(`SELECT id,player_id,event_type,fundamental_or_market,occurred_at,first_seen_at,last_seen_at,source,original_source,authority,confidence,thesis_link,payload_json FROM evidence_events ORDER BY first_seen_at DESC LIMIT 250`).all());
-    if(marketStatus==='PASS')queries.push(env.DB.prepare(`
+    const eventPromise=env.DB.prepare(`SELECT id,player_id,event_type,fundamental_or_market,occurred_at,first_seen_at,last_seen_at,source,original_source,authority,confidence,thesis_link,payload_json FROM evidence_events ORDER BY first_seen_at DESC LIMIT 250`).all();
+    const marketPromise=marketStatus!=='PASS'?Promise.resolve([]):marketLoader
+      ?marketLoader(env,50)
+      :env.DB.prepare(`
       WITH latest AS (SELECT MAX(captured_at) t FROM trending_snapshots)
       SELECT t.captured_at,t.player_id,t.adds_1h,t.adds_3h,t.adds_6h,t.adds_24h,t.drops_1h,t.drops_6h,t.drops_24h,
              COALESCE(p.full_name,t.player_id) full_name,p.team,p.position
       FROM trending_snapshots t LEFT JOIN player_state p ON p.player_id=t.player_id
       WHERE t.captured_at=(SELECT t FROM latest)
-      ORDER BY COALESCE(t.adds_1h,0) DESC,COALESCE(t.adds_3h,0) DESC LIMIT 50`).all());
-    const rows=await Promise.all(queries);
-    events=filterLaneEvents(rows[0]?.results||[],{marketStatus,playerStateStatus});
-    market=marketStatus==='PASS'?(rows[1]?.results||[]):[];
+      ORDER BY COALESCE(t.adds_1h,0) DESC,COALESCE(t.adds_3h,0) DESC LIMIT 50`).all().then(result=>result.results||[]);
+    const [eventResult,marketRows]=await Promise.all([eventPromise,marketPromise]);
+    events=filterLaneEvents(eventResult?.results||[],{marketStatus,playerStateStatus});
+    market=marketStatus==='PASS'?(marketRows||[]):[];
     try{
       const leagueUrl=new URL('/league-state',request.url);
       const response=await baseWorker.fetch(new Request(leagueUrl,{method:'GET'}),env,ctx);

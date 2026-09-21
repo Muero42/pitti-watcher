@@ -1,12 +1,13 @@
 # PITTI CURRENT STATE
 
-Updated: 2026-09-01
-Watcher version: v0.2.5
+Updated: 2026-09-21
+Production watcher version: v0.2.8
+Feature candidate: v0.2.9 (`codex/watcher-p0-chunked-frames`)
 Mode: POST_DRAFT / PRE_WEEK_1
 
 ## Source of truth
 
-This file is the canonical PITTI project checkpoint for chat handoffs. Code state is the current `main` branch of `Muero42/pitti-watcher`.
+This file is the canonical PITTI project checkpoint for chat handoffs. The feature branch was created directly from canonical `origin/main@749ba52`; production remains unchanged until a separately authorized migration and deployment.
 
 ## League / draft context
 
@@ -77,11 +78,11 @@ Draft-only return probability, ADP-return logic and opponent pick prediction are
 
 ## Next technical priorities
 
-1. Deploy current `main` to the Cloudflare Worker if the deployment is not automatic.
-2. Verify `/health` reports v0.2.2.
-3. Verify `/league-state` resolves the correct league and user roster.
-4. Confirm live Sleeper state shows the reported Charbonnet reserve/IR + Bigsby roster move.
-5. Verify `/companion-feed` v2 returns `freeAgency.available=true` and excludes all owned players.
+1. Review and merge the v0.2.9 P0 candidate; do not apply its migration or deploy without explicit authorization.
+2. Apply migration `0003_chunked_player_state_and_market_frames.sql` in a non-production database and run the v0.2.9 scheduled paths there.
+3. Shadow-measure phase-level D1 rows and invocation CPU; validate the projected market write reduction and player chunk headroom.
+4. Calibrate write-budget multipliers and define the pending-outbox hard bound before promoting the preview SQL into a migration.
+5. Verify `/league-state` and `/companion-feed` continue to resolve ownership and exclude owned candidates after the frame read-path switch.
 6. Only after that, connect roster-relative add/drop scoring in the Companion UI.
 
 
@@ -97,3 +98,26 @@ Draft-only return probability, ADP-return logic and opponent pick prediction are
 - This confirms the write amplification fix is effective while a read-amplified feed health query remains.
 - companionFeed now probes only the newest scheduled trending/player-state run via reverse INTEGER PRIMARY KEY id instead of selecting/scanning up to 40 mixed run rows.
 - No cron-frequency reduction; 15-minute market detection remains intact.
+
+## 2026-09-21 live audit
+
+- Canonical source is `main@749ba52`; production serves Worker version `c04a4018-ab00-4023-b16b-08d403f4f2ac` and `/health` reports `0.2.8`.
+- Market is the dominant D1 write lane. The trailing-24-hour query attribution is recorded in `docs/LIVE_COST_ATTRIBUTION_2026-09-21.md`.
+- A sampled market cron completed `ok` with 42 ms Worker CPU and 26,044 ms wall time.
+- The market lane is live `PASS`. The player-state lane is live `FAIL`: sweep run `3983` remains open at scope cursor `1/5` with 477 seen players. The configured continuation cron is active, but the cursor has not advanced.
+- Lane isolation remains effective: the overall companion gate stays `PASS` from the healthy market lane while fundamental evidence from player-state is excluded.
+
+## Write-budget and alert-outbox foundation
+
+- `docs/sql/write_budget_alert_outbox_preview.sql`, `src/write-budget.js`, and the architecture document specify an atomic, fail-closed daily reservation model per lane plus a deduplicated internal alert outbox.
+- The preview SQL is deliberately outside `migrations/`; the foundation is not production-deployed and is not wired into the active path. Enforcement requires shadow validation of the provisional billable-write estimates and an explicit activation change.
+- The outbox has no delivery consumer. No external message source/destination and no automated fantasy transaction path were added.
+
+## v0.2.9 P0 candidate
+
+- Player state uses a persisted two-dimensional cursor (`next_index`, `scope_offset`) and processes 25–50 eligible players per invocation (configured default: 40).
+- A scope ETag is pinned across its chunks. Rotation fails the partial run and restarts from a fresh snapshot; a run becomes `PASS` only after all five scope ETags revalidate.
+- Structured phase markers cover source fetch/revalidation, state load, evidence batch, state batch, and checkpoint without logging payloads or bind values.
+- Market polling writes one compact JSON frame per run, retains only current plus previous frame, and writes evidence only for `STARTED`, `LEVEL_UP`, and `ENDED` transitions.
+- At 96 market polls/day, the steady snapshot/retention baseline drops from tens of thousands of row/index mutations to roughly 190 frame mutations/day plus run control and actual signal transitions. The `<10k/day` target is a design projection pending shadow measurement.
+- `tools/inspect-live-schedules.mjs` was a temporary read-only audit helper, not a product or deployment artifact, and is intentionally absent.

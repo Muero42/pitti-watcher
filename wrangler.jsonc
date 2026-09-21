@@ -1,7 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "pitti-watcher",
-  "main": "src/index-v028.js",
+  "main": "src/index-v029.js",
   "compatibility_date": "2026-08-10",
   "triggers": {
     "crons": ["*/15 * * * *", "17 4 * * *", "2,7,12,22,37,52 * * * *"]
@@ -16,7 +16,13 @@
   "vars": {
     "SLEEPER_BASE": "https://api.sleeper.app/v1",
     "TREND_LIMIT": "200",
+    "PLAYER_STATE_CHUNK_SIZE": "40",
+    "PHASE_LOGGING": "1",
     "DRAFT_ID": "1366053132970233856",
     "MY_DRAFT_SLOT": "9"
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
   }
 }
