@@ -6,6 +6,8 @@ const LANES = new Set(['market', 'player_state']);
 export const BILLABLE_WRITE_ESTIMATES = Object.freeze({
   marketFrame: 1,
   evidenceWithOutbox: 6,
+  playerStateCandidateStage: 1,
+  playerStateCandidateDelete: 1,
   playerStateInsert: 1,
   playerStateUpdate: 1,
   retentionDelete: 1,
@@ -65,6 +67,8 @@ export function estimateBillableWrites(counts = {}) {
   return (
     count('marketFrames') * BILLABLE_WRITE_ESTIMATES.marketFrame +
     count('evidenceInserts') * BILLABLE_WRITE_ESTIMATES.evidenceWithOutbox +
+    count('playerStateCandidatesStaged') * BILLABLE_WRITE_ESTIMATES.playerStateCandidateStage +
+    count('playerStateCandidatesDeleted') * BILLABLE_WRITE_ESTIMATES.playerStateCandidateDelete +
     count('playerStateInserts') * BILLABLE_WRITE_ESTIMATES.playerStateInsert +
     count('playerStateUpdates') * BILLABLE_WRITE_ESTIMATES.playerStateUpdate +
     count('retentionDeletes') * BILLABLE_WRITE_ESTIMATES.retentionDelete +

@@ -10,7 +10,7 @@ Scope: existing Sleeper market and player-state lanes only
 3. A reservation is atomic in D1. Concurrent invocations cannot both spend the same remaining allowance.
 4. A reservation may be released only before any domain write. After an ambiguous or partial write, it remains reserved until an operator reconciles it; leaking allowance is safer than overspending it.
 5. `committed_writes` may never exceed `reserved_writes`.
-6. Alert creation is gated by successful run finalization and deduplicated by evidence fingerprint; failed or open observations never enter the outbox.
+6. Alert creation is gated by successful run finalization and deduplicated by evidence fingerprint; failed or open observations never enter the outbox. New fundamental fingerprints include the coherent observation run, so retries remain idempotent without suppressing a genuinely later recurrence of the same transition.
 7. The outbox has no delivery consumer in this change. It sends no email, Slack, Discord, push, or other external message.
 8. The watcher observes fantasy state. It does not submit adds, drops, waivers, trades, lineup changes, or any other fantasy transaction.
 
@@ -47,7 +47,7 @@ The budget window is a UTC day. Limits are mandatory environment variables:
 
 The initial limits should be chosen below the account-level allowance and leave a fixed control-plane reserve for run finalization, budget bookkeeping, migrations, and manual recovery. Do not set the two lane limits to the full provider quota.
 
-`src/write-budget.js` deliberately uses provisional conservative multipliers derived from the current schema/index shape and live D1 observations. They are not treated as billing truth. Before enforcement is activated, validate the multipliers in a disposable/non-production database using `docs/sql/write_budget_alert_outbox_preview.sql`; the outbox trigger adds writes to a new evidence insert.
+`src/write-budget.js` deliberately uses provisional conservative multipliers derived from the current schema/index shape and live D1 observations, including candidate staging and deletion. They are not treated as billing truth. Before enforcement is activated, validate the multipliers in a disposable/non-production database using `docs/sql/write_budget_alert_outbox_preview.sql`; the outbox trigger adds writes to a new evidence insert.
 
 ## Query attribution
 
@@ -63,9 +63,8 @@ Every D1 result must be recorded under a stable phase name, not raw parameter va
 | player_state | sweep.active / sweep.init / checkpoint | observation cursor lifecycle |
 | player_state | state.load | 25–50-ID canonical-state reads during observation |
 | player_state | candidate.batch | run-scoped changed-state staging; canonical state remains untouched |
-| player_state | promotion.load / promotion.state_load | staged candidates and current canonical state after source revalidation |
-| player_state | promotion.evidence_batch | accepted fundamental evidence; new inserts later create outbox rows |
-| player_state | promotion.state_batch / promotion.checkpoint | accepted canonical-state promotion and resumable promotion cursor |
+| player_state | promotion.load | staged candidate count after source revalidation |
+| player_state | promotion.commit | one set-based D1 transaction promotes evidence and canonical state, finalizes the run, and removes its candidates |
 | player_state | source.fetch / source.revalidate | network/CPU only; zero D1 rows |
 
 For each phase emit one structured summary after completion: lane, run ID, phase, query count, rows read, rows written, SQL duration, and wall duration. Never emit bound values, payload JSON, player names, tokens, or raw D1 errors. Worker CPU is invocation-level platform telemetry; D1 SQL duration is not Worker CPU and must remain a separate field.

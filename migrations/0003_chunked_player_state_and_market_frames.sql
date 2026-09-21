@@ -37,5 +37,8 @@ CREATE TABLE IF NOT EXISTS player_state_candidates (
   status TEXT,
   state_hash TEXT NOT NULL,
   observed_at INTEGER NOT NULL,
+  evidence_fingerprint TEXT,
+  evidence_thesis_link TEXT,
+  evidence_payload_json TEXT,
   PRIMARY KEY (run_id, player_id)
 ) WITHOUT ROWID;

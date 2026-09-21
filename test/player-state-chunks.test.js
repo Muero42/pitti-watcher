@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   beginChunkedPlayerStateSweep,
   continueChunkedPlayerStateSweep,
+  evidenceFingerprint,
   processPlayerStateSweepChunk,
   playerStateOf,
   stateHash
@@ -14,7 +15,17 @@ const NOW=1790000000000;
 const SCOPES=['QB','RB','WR','TE','K'];
 const success=(changes=1)=>({success:true,meta:{changes}});
 
-function fixture(t,{count=95,failCheckpointOnce=false}={}){
+test('fundamental evidence is idempotent within one observation but distinct across later episodes',async()=>{
+  const event={
+    player_id:'p1',event_type:'PLAYER_STATE_CHANGED',fundamental_or_market:'fundamental',
+    original_source:'Sleeper Player Data',observation_run_id:11,
+    payload:{diffs:{injury_status:{before:null,after:'Questionable'}}}
+  };
+  assert.equal(await evidenceFingerprint(event),await evidenceFingerprint({...event}));
+  assert.notEqual(await evidenceFingerprint(event),await evidenceFingerprint({...event,observation_run_id:12}));
+});
+
+function fixture(t,{count=95,failCheckpointOnce=false,failPromotionOnce=false}={}){
   t.mock.method(Date,'now',()=>NOW);
   const oldPlayer={full_name:'Player',position:'QB',team:'AAA'};
   const newPlayer={...oldPlayer,injury_status:'Questionable'};
@@ -34,6 +45,7 @@ function fixture(t,{count=95,failCheckpointOnce=false}={}){
   const evidence=new Map();
   const calls={fetches:[],checkpointAttempts:0,batchSizes:[]};
   let failCheckpoint=failCheckpointOnce;
+  let failPromotion=failPromotionOnce;
 
   const DB={
     prepare(raw){
@@ -50,6 +62,10 @@ function fixture(t,{count=95,failCheckpointOnce=false}={}){
             return active?{...active}:null;
           }
           if(sql.startsWith('SELECT finished_at,ok,item_count,error'))return runs.find(r=>r.id===args[0])||null;
+          if(sql.startsWith('SELECT finished_at,ok,item_count FROM watcher_runs'))return runs.find(r=>r.id===args[0])||null;
+          if(sql.startsWith('SELECT COUNT(*) candidate_count')){
+            return{candidate_count:[...candidates.values()].filter(row=>row.run_id===args[0]).length};
+          }
           throw new Error(`Unexpected first: ${sql}`);
         },
         async all(){
@@ -98,10 +114,31 @@ function fixture(t,{count=95,failCheckpointOnce=false}={}){
     },
     async batch(statements){
       calls.batchSizes.push(statements.length);
+      if(failPromotion&&statements.some(stmt=>stmt.sql.includes('UPDATE watcher_runs SET finished_at'))){
+        failPromotion=false;
+        throw new Error('synthetic atomic promotion failure');
+      }
       for(const stmt of statements){
         if(stmt.sql.startsWith('INSERT INTO player_state_candidates')){
-          const [run_id,player_id,full_name,team,position,injury_status,practice_participation,depth_chart_order,status,nextHash,observed_at]=stmt.args;
-          candidates.set(`${run_id}:${player_id}`,{run_id,player_id:String(player_id),full_name,team,position,injury_status,practice_participation,depth_chart_order,status,state_hash:nextHash,observed_at});
+          const [run_id,player_id,full_name,team,position,injury_status,practice_participation,depth_chart_order,status,nextHash,observed_at,evidence_fingerprint,evidence_thesis_link,evidence_payload_json]=stmt.args;
+          candidates.set(`${run_id}:${player_id}`,{run_id,player_id:String(player_id),full_name,team,position,injury_status,practice_participation,depth_chart_order,status,state_hash:nextHash,observed_at,evidence_fingerprint,evidence_thesis_link,evidence_payload_json});
+        }else if(stmt.sql.startsWith('INSERT INTO evidence_events(')&&stmt.sql.includes('FROM player_state_candidates')){
+          for(const candidate of [...candidates.values()].filter(row=>row.run_id===stmt.args[0]&&row.evidence_fingerprint)){
+            evidence.set(candidate.evidence_fingerprint,{fingerprint:candidate.evidence_fingerprint,observation_run_id:candidate.run_id});
+          }
+        }else if(stmt.sql.startsWith('INSERT INTO player_state(')&&stmt.sql.includes('FROM player_state_candidates')){
+          for(const candidate of [...candidates.values()].filter(row=>row.run_id===stmt.args[0])){
+            const prior=state.get(String(candidate.player_id))||{};
+            state.set(String(candidate.player_id),{...prior,...candidate,first_seen_at:prior.first_seen_at??candidate.observed_at,last_seen_at:candidate.observed_at});
+          }
+        }else if(stmt.sql.startsWith('UPDATE player_state_sweeps SET promotion_offset')){
+          const sweep=sweeps.get(stmt.args[1]);
+          if(sweep&&sweep.promotion_offset===0&&sweep.revalidated_at!=null)sweep.promotion_offset=stmt.args[0];
+        }else if(stmt.sql.startsWith('UPDATE watcher_runs SET finished_at')){
+          const row=runs.find(r=>r.id===stmt.args[2]&&r.finished_at==null);
+          if(row)Object.assign(row,{finished_at:stmt.args[0],ok:1,item_count:stmt.args[1],error:null});
+        }else if(stmt.sql.startsWith('DELETE FROM player_state_candidates')){
+          for(const [key,candidate] of candidates)if(candidate.run_id===stmt.args[0])candidates.delete(key);
         }else if(stmt.sql.startsWith('INSERT INTO evidence_events')){
           evidence.set(stmt.args[0],{fingerprint:stmt.args[0],observation_run_id:stmt.args[13]});
         }else if(stmt.sql.startsWith('UPDATE player_state')){
@@ -152,7 +189,7 @@ test('chunked sweep persists a two-dimensional cursor and stays fail-closed thro
   assert.ok(f.calls.batchSizes.every(size=>size<=75));
   assert.deepEqual(f.calls.fetches.slice(-5).map(x=>x.scope),SCOPES);
   assert.ok(f.calls.fetches.slice(-5).every(x=>x.conditional));
-  for(const phase of ['source.fetch','state.load','candidate.batch','checkpoint','promotion.load','promotion.evidence_batch','promotion.state_batch']){
+  for(const phase of ['source.fetch','state.load','candidate.batch','checkpoint','promotion.load','promotion.commit']){
     assert.ok(logs.some(row=>row.phase===phase&&row.state==='start'),`missing ${phase} start`);
     assert.ok(logs.some(row=>row.phase===phase&&row.state==='ok'),`missing ${phase} ok`);
   }
@@ -201,6 +238,7 @@ test('a rejected B observation leaves A canonical and the same accepted C transi
   assert.equal(result.complete,true);
   assert.equal(f.runs[1].ok,1);
   assert.equal(f.state.get('0000').injury_status,'Questionable');
+  assert.equal(f.candidates.size,1);
   assert.equal(f.evidence.size,1);
   assert.deepEqual([...f.evidence.values()].map(row=>row.observation_run_id),[2]);
   const visible=[...f.evidence.values()].filter(event=>{
@@ -208,6 +246,19 @@ test('a rejected B observation leaves A canonical and the same accepted C transi
     return run?.ok===1&&run.finished_at!=null;
   });
   assert.equal(visible.length,1);
+});
+
+test('promotion stays below the free-plan query cap and rolls back as one D1 batch',async t=>{
+  const f=fixture(t,{count:40,failPromotionOnce:true});
+  t.mock.method(console,'log',()=>{});
+  await beginChunkedPlayerStateSweep(f.env,NOW);
+  for(let i=0;i<4;i++)await continueChunkedPlayerStateSweep(f.env);
+  await assert.rejects(continueChunkedPlayerStateSweep(f.env),/synthetic atomic promotion failure/);
+  assert.equal(f.runs[0].ok,0);
+  assert.ok([...f.state.values()].every(row=>row.injury_status==null));
+  assert.equal(f.evidence.size,0);
+  assert.equal(f.calls.batchSizes.at(-1),5);
+  assert.ok(1+1+5<=50,'active-sweep read, candidate count and promotion batch must fit the free D1 query cap');
 });
 
 test('v0.2.9 disables legacy debug mutations before touching storage or upstreams',async t=>{
