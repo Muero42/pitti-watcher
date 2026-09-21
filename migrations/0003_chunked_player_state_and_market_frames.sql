@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS trending_snapshot_frames (
 CREATE TABLE IF NOT EXISTS player_state_candidates (
   run_id INTEGER NOT NULL REFERENCES watcher_runs(id),
   player_id TEXT NOT NULL,
+  source_scope TEXT NOT NULL CHECK (source_scope IN ('QB','RB','WR','TE','K')),
   full_name TEXT,
   team TEXT,
   position TEXT,

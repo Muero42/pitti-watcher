@@ -10,6 +10,7 @@ import {
 } from '../src/index.js';
 import {runLaneStatus} from '../src/index-v027.js';
 import v029Worker from '../src/index-v029.js';
+import * as v029Module from '../src/index-v029.js';
 
 const NOW=1790000000000;
 const SCOPES=['QB','RB','WR','TE','K'];
@@ -25,7 +26,7 @@ test('fundamental evidence is idempotent within one observation but distinct acr
   assert.notEqual(await evidenceFingerprint(event),await evidenceFingerprint({...event,observation_run_id:12}));
 });
 
-function fixture(t,{count=95,failCheckpointOnce=false,failPromotionOnce=false}={}){
+function fixture(t,{count=95,changedCount=count,failCheckpointOnce=false,failPromotionOnce=false}={}){
   t.mock.method(Date,'now',()=>NOW);
   const oldPlayer={full_name:'Player',position:'QB',team:'AAA'};
   const newPlayer={...oldPlayer,injury_status:'Questionable'};
@@ -35,7 +36,7 @@ function fixture(t,{count=95,failCheckpointOnce=false,failPromotionOnce=false}={
     const id=String(i).padStart(4,'0');
     const normalized=playerStateOf(oldPlayer);
     state.set(id,{player_id:id,...normalized,state_hash:stateHash(normalized)});
-    qb[id]=newPlayer;
+    qb[id]=i<changedCount?newPlayer:oldPlayer;
   }
   const payloads={QB:qb,RB:{},WR:{},TE:{},K:{}};
   const etags=Object.fromEntries(SCOPES.map(scope=>[scope,`"${scope}-etag"`]));
@@ -120,8 +121,8 @@ function fixture(t,{count=95,failCheckpointOnce=false,failPromotionOnce=false}={
       }
       for(const stmt of statements){
         if(stmt.sql.startsWith('INSERT INTO player_state_candidates')){
-          const [run_id,player_id,full_name,team,position,injury_status,practice_participation,depth_chart_order,status,nextHash,observed_at,evidence_fingerprint,evidence_thesis_link,evidence_payload_json]=stmt.args;
-          candidates.set(`${run_id}:${player_id}`,{run_id,player_id:String(player_id),full_name,team,position,injury_status,practice_participation,depth_chart_order,status,state_hash:nextHash,observed_at,evidence_fingerprint,evidence_thesis_link,evidence_payload_json});
+          const [run_id,player_id,source_scope,full_name,team,position,injury_status,practice_participation,depth_chart_order,status,nextHash,observed_at,evidence_fingerprint,evidence_thesis_link,evidence_payload_json]=stmt.args;
+          candidates.set(`${run_id}:${player_id}`,{run_id,player_id:String(player_id),source_scope,full_name,team,position,injury_status,practice_participation,depth_chart_order,status,state_hash:nextHash,observed_at,evidence_fingerprint,evidence_thesis_link,evidence_payload_json});
         }else if(stmt.sql.startsWith('INSERT INTO evidence_events(')&&stmt.sql.includes('FROM player_state_candidates')){
           for(const candidate of [...candidates.values()].filter(row=>row.run_id===stmt.args[0]&&row.evidence_fingerprint)){
             evidence.set(candidate.evidence_fingerprint,{fingerprint:candidate.evidence_fingerprint,observation_run_id:candidate.run_id});
@@ -138,7 +139,14 @@ function fixture(t,{count=95,failCheckpointOnce=false,failPromotionOnce=false}={
           const row=runs.find(r=>r.id===stmt.args[2]&&r.finished_at==null);
           if(row)Object.assign(row,{finished_at:stmt.args[0],ok:1,item_count:stmt.args[1],error:null});
         }else if(stmt.sql.startsWith('DELETE FROM player_state_candidates')){
-          for(const [key,candidate] of candidates)if(candidate.run_id===stmt.args[0])candidates.delete(key);
+          for(const [key,candidate] of candidates){
+            if(candidate.run_id===stmt.args[0]&&(stmt.args.length<2||candidate.source_scope===stmt.args[1]))candidates.delete(key);
+          }
+        }else if(stmt.sql.startsWith('UPDATE player_state_sweeps')&&stmt.sql.includes('SET scope_offset=0')){
+          const sweep=sweeps.get(stmt.args[0]);
+          if(sweep&&sweep.next_index===stmt.args[1]&&sweep.scope_offset===stmt.args[2]&&sweep.revalidated_at==null){
+            sweep.seen_count-=sweep.scope_offset;sweep.scope_offset=0;sweep.scope_etag=null;
+          }
         }else if(stmt.sql.startsWith('INSERT INTO evidence_events')){
           evidence.set(stmt.args[0],{fingerprint:stmt.args[0],observation_run_id:stmt.args[13]});
         }else if(stmt.sql.startsWith('UPDATE player_state')){
@@ -187,8 +195,7 @@ test('chunked sweep persists a two-dimensional cursor and stays fail-closed thro
   assert.equal(f.runs[0].ok,1);
   assert.equal(f.runs[0].item_count,95);
   assert.ok(f.calls.batchSizes.every(size=>size<=75));
-  assert.deepEqual(f.calls.fetches.slice(-5).map(x=>x.scope),SCOPES);
-  assert.ok(f.calls.fetches.slice(-5).every(x=>x.conditional));
+  assert.deepEqual(f.calls.fetches.filter(x=>x.conditional).map(x=>x.scope),SCOPES);
   for(const phase of ['source.fetch','state.load','candidate.batch','checkpoint','promotion.load','promotion.commit']){
     assert.ok(logs.some(row=>row.phase===phase&&row.state==='start'),`missing ${phase} start`);
     assert.ok(logs.some(row=>row.phase===phase&&row.state==='ok'),`missing ${phase} ok`);
@@ -214,33 +221,36 @@ test('an aborted chunk resumes from the last committed cursor without duplicate 
   assert.equal(sweep.seen_count,40);
 });
 
-test('a rejected B observation leaves A canonical and the same accepted C transition emits exactly once',async t=>{
-  const f=fixture(t,{count:1});
+test('a rotated scope rejects B locally and the same sealed C transition emits exactly once',async t=>{
+  const f=fixture(t,{count:41,changedCount:1});
   t.mock.method(console,'log',()=>{});
   await beginChunkedPlayerStateSweep(f.env,NOW);
-  for(let i=0;i<4;i++)await continueChunkedPlayerStateSweep(f.env);
-  assert.equal(f.sweeps.get(1).next_index,5);
+  assert.equal(f.sweeps.get(1).scope_offset,40);
   assert.equal(f.state.get('0000').injury_status,null);
   assert.equal(f.candidates.get('1:0000').injury_status,'Questionable');
   assert.equal(f.evidence.size,0);
 
-  f.setEtag('WR','"WR-rotated"');
-  await continueChunkedPlayerStateSweep(f.env);
+  f.setEtag('QB','"QB-rotated"');
+  const reset=await continueChunkedPlayerStateSweep(f.env);
+  assert.equal(reset.reset,true);
+  assert.equal(f.sweeps.get(1).next_index,0);
+  assert.equal(f.sweeps.get(1).scope_offset,0);
   assert.equal(f.runs[0].ok,0);
   assert.equal(f.state.get('0000').injury_status,null);
+  assert.equal(f.candidates.size,0);
   assert.equal(f.evidence.size,0);
 
   let result;
-  for(let i=0;i<8;i++){
+  for(let i=0;i<10;i++){
     result=await continueChunkedPlayerStateSweep(f.env);
     if(result.complete)break;
   }
   assert.equal(result.complete,true);
-  assert.equal(f.runs[1].ok,1);
+  assert.equal(f.runs[0].ok,1);
   assert.equal(f.state.get('0000').injury_status,'Questionable');
-  assert.equal(f.candidates.size,1);
+  assert.equal(f.candidates.size,0);
   assert.equal(f.evidence.size,1);
-  assert.deepEqual([...f.evidence.values()].map(row=>row.observation_run_id),[2]);
+  assert.deepEqual([...f.evidence.values()].map(row=>row.observation_run_id),[1]);
   const visible=[...f.evidence.values()].filter(event=>{
     const run=f.runs.find(row=>row.id===event.observation_run_id);
     return run?.ok===1&&run.finished_at!=null;
@@ -303,6 +313,10 @@ test('v0.2.9 health identifies the chunked-frame entrypoint',async()=>{
   const response=await v029Worker.fetch(new Request('https://local.invalid/health'),{});
   assert.equal(response.status,200);
   assert.equal((await response.json()).version,'0.2.9');
+});
+
+test('v0.2.9 exposes only a valid default Worker entrypoint',()=>{
+  assert.deepEqual(Object.keys(v029Module),['default']);
 });
 
 test('v0.2.9 ignores unknown cron expressions instead of starting market work',async t=>{

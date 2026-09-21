@@ -63,7 +63,7 @@ export default {
       if (!context.leagueId) return jsonCors({ ok:false, error:'league_id could not be resolved' },400);
       return jsonCors(await leagueState(env, context.leagueId, context.userId, context.rosterId));
     }
-    const auth = requireWatcherToken(request, env);
+    const auth = await requireWatcherToken(request, env);
     if (auth) return auth;
     if (url.pathname === '/events') {
       const limit = clampInt(url.searchParams.get('limit'), 1, 100, 30);
@@ -308,12 +308,27 @@ function jsonCors(data,status=200){
   }});
 }
 
-function requireWatcherToken(request, env) {
+async function timingSafeStringEqual(provided, expected) {
+  const encoder = new TextEncoder();
+  const [providedHash, expectedHash] = await Promise.all([
+    crypto.subtle.digest('SHA-256', encoder.encode(provided)),
+    crypto.subtle.digest('SHA-256', encoder.encode(expected))
+  ]);
+  if (typeof crypto.subtle.timingSafeEqual === 'function') {
+    return crypto.subtle.timingSafeEqual(providedHash, expectedHash);
+  }
+  const left = new Uint8Array(providedHash), right = new Uint8Array(expectedHash);
+  let difference = 0;
+  for (let index = 0; index < left.length; index++) difference |= left[index] ^ right[index];
+  return difference === 0;
+}
+
+async function requireWatcherToken(request, env) {
   const expected = String(env.WATCHER_TOKEN || '').trim();
   if (!expected) return json({ ok: false, error: 'WATCHER_TOKEN is not configured' }, 503);
   const header = String(request.headers.get('authorization') || '');
   const supplied = header.startsWith('Bearer ') ? header.slice(7) : '';
-  if (!supplied || supplied !== expected) return json({ ok: false, error: 'unauthorized' }, 401);
+  if (!await timingSafeStringEqual(supplied, expected)) return json({ ok: false, error: 'unauthorized' }, 401);
   return null;
 }
 
@@ -1137,7 +1152,7 @@ async function initializeChunkedPlayerStateSweep(env, at, source = 'scheduled', 
   });
 }
 
-async function stagePlayerStateEntries(env, at, runId, entries, existingRows, context) {
+async function stagePlayerStateEntries(env, at, runId, sourceScope, entries, existingRows, context) {
   const existing = new Map((existingRows || []).map(row => [String(row.player_id), row]));
   const statements = [];
   let seen = 0, changed = 0;
@@ -1171,11 +1186,12 @@ async function stagePlayerStateEntries(env, at, runId, entries, existingRows, co
     }
     statements.push(env.DB.prepare(`
       INSERT INTO player_state_candidates(
-        run_id,player_id,full_name,team,position,injury_status,
+        run_id,player_id,source_scope,full_name,team,position,injury_status,
         practice_participation,depth_chart_order,status,state_hash,observed_at,
         evidence_fingerprint,evidence_thesis_link,evidence_payload_json
-      ) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)
+      ) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)
       ON CONFLICT(run_id,player_id) DO UPDATE SET
+        source_scope=excluded.source_scope,
         full_name=excluded.full_name,team=excluded.team,position=excluded.position,
         injury_status=excluded.injury_status,practice_participation=excluded.practice_participation,
         depth_chart_order=excluded.depth_chart_order,status=excluded.status,
@@ -1184,13 +1200,35 @@ async function stagePlayerStateEntries(env, at, runId, entries, existingRows, co
         evidence_thesis_link=excluded.evidence_thesis_link,
         evidence_payload_json=excluded.evidence_payload_json
     `).bind(
-      runId,id,state.full_name,state.team,state.position,state.injury_status,
+      runId,id,sourceScope,state.full_name,state.team,state.position,state.injury_status,
       state.practice_participation,state.depth_chart_order,state.status,hash,at,
       evidenceFingerprintValue,evidenceThesisLink,evidencePayloadJson
     ));
   }
   await runStatementBatches(env, 'player_state', 'candidate.batch', context, statements, PLAYER_STATE_BATCH_SIZE);
   return { seen, changed, candidates: statements.length };
+}
+
+async function resetPlayerStateScope(env, sweep, scope, context) {
+  const results = await runPhase(env, 'player_state', 'scope.reset', context, () => env.DB.batch([
+    env.DB.prepare(`
+      DELETE FROM player_state_candidates WHERE run_id=?1 AND source_scope=?2
+    `).bind(sweep.run_id, scope),
+    env.DB.prepare(`
+      UPDATE player_state_sweeps
+      SET scope_offset=0,scope_etag=NULL,seen_count=seen_count-scope_offset
+      WHERE run_id=?1 AND next_index=?2 AND scope_offset=?3 AND revalidated_at IS NULL
+    `).bind(sweep.run_id, Number(sweep.next_index), Number(sweep.scope_offset || 0))
+  ]));
+  const checkpoint = results?.[1];
+  if (checkpoint?.success !== true || checkpoint.meta?.changes !== 1) {
+    throw new Error('PLAYER_SCOPE_RESET_FAILED');
+  }
+  return {
+    ok: true, complete: false, reset: true, scope,
+    scope_index: Number(sweep.next_index), player_offset: 0,
+    seen: Number(sweep.seen_count) - Number(sweep.scope_offset || 0), processed: 0
+  };
 }
 
 async function promotePlayerStateRun(env, sweep) {
@@ -1271,12 +1309,6 @@ async function processPlayerStateSweepChunk(env, sweep) {
 
   if (index === PLAYER_STATE_SCOPES.length) {
     if (sweep.revalidated_at != null) return promotePlayerStateRun(env, sweep);
-    const coherent = await runPhase(env, 'player_state', 'source.revalidate', baseContext,
-      () => revalidatePlayerStateScopes(env, etags));
-    if (!coherent) {
-      await safeFinishRun(env, Number(sweep.run_id), false, 0);
-      return initializeChunkedPlayerStateSweep(env, Date.now(), 'scheduled');
-    }
     const revalidatedAt = Date.now();
     const checkpoint = await env.DB.prepare(`
       UPDATE player_state_sweeps SET revalidated_at=?1
@@ -1290,8 +1322,7 @@ async function processPlayerStateSweepChunk(env, sweep) {
   const snapshot = await runPhase(env, 'player_state', 'source.fetch', baseContext,
     () => fetchPlayerScope(env, scope));
   if (offset > 0 && String(sweep.scope_etag || '') !== snapshot.sourceEtag) {
-    await safeFinishRun(env, Number(sweep.run_id), false, 0);
-    return initializeChunkedPlayerStateSweep(env, Date.now(), 'scheduled');
+    return resetPlayerStateScope(env, sweep, scope, { ...baseContext, scope });
   }
 
   const entries = Object.entries(snapshot.players || {})
@@ -1308,10 +1339,17 @@ async function processPlayerStateSweepChunk(env, sweep) {
     return env.DB.prepare(`SELECT * FROM player_state WHERE player_id IN (${placeholders})`).bind(...ids).all();
   });
   const persisted = await stagePlayerStateEntries(
-    env, Number(sweep.started_at), Number(sweep.run_id), chunk, existingResult.results || [], context
+    env, Number(sweep.started_at), Number(sweep.run_id), scope, chunk, existingResult.results || [], context
   );
 
   const scopeComplete = offset + chunk.length >= entries.length;
+  if (scopeComplete) {
+    const sealed = await runPhase(env, 'player_state', 'source.revalidate', context,
+      () => fetchPlayerScope(env, scope, snapshot.sourceEtag, false));
+    if (!sealed.unchanged || sealed.sourceEtag !== snapshot.sourceEtag) {
+      return resetPlayerStateScope(env, sweep, scope, context);
+    }
+  }
   const nextIndex = scopeComplete ? index + 1 : index;
   const nextOffset = scopeComplete ? 0 : offset + chunk.length;
   if (scopeComplete) etags[scope] = snapshot.sourceEtag;
@@ -1356,5 +1394,5 @@ async function continueChunkedPlayerStateSweep(env) {
   }
 }
 
-export { playerStateOf, trackedState, stateHash, inferThesisLink, marketSignals, marketTransitionPlan, nextMarketSignalState, evidenceFingerprint, depthChartOrderOf, normalizeRunType, normalizeRunSource, runsQuery, ownershipStatus, buildFreeAgencyRadar, resolveLeagueContext, previousTrendingSnapshotSql };
+export { playerStateOf, trackedState, stateHash, inferThesisLink, marketSignals, marketTransitionPlan, nextMarketSignalState, evidenceFingerprint, depthChartOrderOf, normalizeRunType, normalizeRunSource, runsQuery, ownershipStatus, buildFreeAgencyRadar, resolveLeagueContext, previousTrendingSnapshotSql, timingSafeStringEqual };
 export { safeFinishRun, runTrending, runTrendingFrames, processTrendingFrameRun, latestMarketFrameRows, runPlayerState, beginPlayerStateSweep, continuePlayerStateSweep, beginChunkedPlayerStateSweep, continueChunkedPlayerStateSweep, processPlayerStateSweepChunk };

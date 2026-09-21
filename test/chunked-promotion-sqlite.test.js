@@ -60,9 +60,9 @@ test('active migrations and preview outbox accept the atomic set-based promotion
   `).run(oldState.full_name,oldState.team,oldState.position,oldState.injury_status,oldState.practice_participation,oldState.depth_chart_order,oldState.status,at,stateHash(oldState));
   db.prepare(`
     INSERT INTO player_state_candidates(
-      run_id,player_id,full_name,team,position,injury_status,practice_participation,depth_chart_order,status,state_hash,observed_at,
+      run_id,player_id,source_scope,full_name,team,position,injury_status,practice_participation,depth_chart_order,status,state_hash,observed_at,
       evidence_fingerprint,evidence_thesis_link,evidence_payload_json
-    ) VALUES(1,'p1',?1,?2,?3,?4,?5,?6,?7,?8,?9,'fingerprint','availability_contingency','{"player":"Player"}')
+    ) VALUES(1,'p1','RB',?1,?2,?3,?4,?5,?6,?7,?8,?9,'fingerprint','availability_contingency','{"player":"Player"}')
   `).run(nextState.full_name,nextState.team,nextState.position,nextState.injury_status,nextState.practice_participation,nextState.depth_chart_order,nextState.status,stateHash(nextState),at);
 
   const result=await processPlayerStateSweepChunk({DB:d1For(db),PHASE_LOGGING:'0'}, {
@@ -86,9 +86,9 @@ test('active migrations and preview outbox accept the atomic set-based promotion
   `).run(at+1);
   db.prepare(`
     INSERT INTO player_state_candidates(
-      run_id,player_id,full_name,team,position,injury_status,practice_participation,depth_chart_order,status,state_hash,observed_at,
+      run_id,player_id,source_scope,full_name,team,position,injury_status,practice_participation,depth_chart_order,status,state_hash,observed_at,
       evidence_fingerprint,evidence_thesis_link,evidence_payload_json
-    ) VALUES(2,'p1',?1,?2,?3,'Out',?4,?5,?6,?7,?8,'fingerprint-2','availability_contingency','{"player":"Player"}')
+    ) VALUES(2,'p1','RB',?1,?2,?3,'Out',?4,?5,?6,?7,?8,'fingerprint-2','availability_contingency','{"player":"Player"}')
   `).run(nextState.full_name,nextState.team,nextState.position,nextState.practice_participation,nextState.depth_chart_order,nextState.status,stateHash({...nextState,injury_status:'Out'}),at+1);
   db.exec(`
     CREATE TRIGGER reject_second_acceptance BEFORE UPDATE OF ok ON watcher_runs

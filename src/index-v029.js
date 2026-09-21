@@ -3,7 +3,8 @@ import {
   beginChunkedPlayerStateSweep,
   continueChunkedPlayerStateSweep,
   latestMarketFrameRows,
-  runTrendingFrames
+  runTrendingFrames,
+  timingSafeStringEqual
 } from './index.js';
 
 const VERSION='0.2.9';
@@ -16,12 +17,12 @@ function jsonCors(data,status=200){
   }});
 }
 
-function requireWatcherToken(request,env){
+async function requireWatcherToken(request,env){
   const expected=String(env.WATCHER_TOKEN||'').trim();
   if(!expected)return jsonCors({ok:false,error:'WATCHER_TOKEN is not configured'},503);
   const header=String(request.headers.get('authorization')||'');
   const supplied=header.startsWith('Bearer ')?header.slice(7):'';
-  if(!supplied||supplied!==expected)return jsonCors({ok:false,error:'unauthorized'},401);
+  if(!await timingSafeStringEqual(supplied,expected))return jsonCors({ok:false,error:'unauthorized'},401);
   return null;
 }
 
@@ -31,7 +32,7 @@ export default {
     if(url.pathname==='/health')return jsonCors({ok:true,service:'pitti-watcher',version:VERSION,at:Date.now()});
     if(url.pathname==='/companion-feed')return companionFeed(request,env,ctx,VERSION,latestMarketFrameRows);
     if(url.pathname==='/market'||url.pathname==='/events'||url.pathname.startsWith('/debug/')){
-      const auth=requireWatcherToken(request,env);
+      const auth=await requireWatcherToken(request,env);
       if(auth)return auth;
     }
     if(url.pathname==='/market'){
@@ -67,5 +68,3 @@ export default {
     console.log(JSON.stringify({event:'watcher_cron_ignored',cron}));
   }
 };
-
-export {MARKET_CRON,PLAYER_STATE_CONTINUATION_CRON};

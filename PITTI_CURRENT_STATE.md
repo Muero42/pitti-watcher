@@ -116,7 +116,7 @@ Draft-only return probability, ADP-return logic and opponent pick prediction are
 ## v0.2.9 P0 candidate
 
 - Player state uses a persisted two-dimensional cursor (`next_index`, `scope_offset`) and processes 25–50 eligible players per invocation (configured default: 40).
-- A scope ETag is pinned across its chunks. Rotation fails the partial run and restarts from a fresh snapshot; a run becomes `PASS` only after all five scope ETags revalidate.
+- A scope ETag is pinned across its chunks and revalidated immediately after that scope's final chunk. Rotation atomically discards and restarts only the affected scope; already sealed scopes remain valid. A run becomes `PASS` only after all five scopes have sealed successfully.
 - Structured phase markers cover source fetch/revalidation, canonical-state load, candidate staging, accepted promotion, evidence, and both observation/promotion checkpoints without logging payloads or bind values.
 - Market polling writes one compact JSON frame per run, retains only current plus previous frame, and writes evidence only for `STARTED`, `LEVEL_UP`, and `ENDED` transitions.
 - At 96 market polls/day, the steady snapshot/retention baseline drops from tens of thousands of row/index mutations to roughly 190 frame mutations/day plus run control and actual signal transitions. The `<10k/day` target is a design projection pending shadow measurement.
@@ -127,9 +127,19 @@ Draft-only return probability, ADP-return logic and opponent pick prediction are
 - Every compact market frame carries its `run_id`; readers and subsequent delta calculations consume only frames whose run is successfully finalized.
 - Market signal episodes are embedded in the frame, so an incomplete invocation cannot mutate a separate global signal generation.
 - New market and chunked player-state evidence carries `observation_run_id`. Feed reads admit only successfully finalized observations; nullable legacy evidence remains explicitly readable.
-- Player-state observations stage changed rows and prepared transition evidence by run and do not mutate canonical hashes before all five source ETags revalidate. One set-based D1 batch then atomically promotes evidence and canonical state, finalizes the coherent run, and removes its candidates; rejected candidates remain invisible. The promotion invocation uses seven explicit D1 statements including its active-run and count reads, below the Free-plan limit of 50 queries per invocation.
+- Player-state observations stage changed rows and prepared transition evidence by run and do not mutate canonical hashes before all five position scopes seal. One set-based D1 batch then atomically promotes evidence and canonical state, finalizes the coherent run, and removes its candidates; rejected candidates remain invisible. The promotion invocation uses seven explicit D1 statements including its active-run and count reads, below the Free-plan limit of 50 queries per invocation.
+- A local Workerd validation showed why global end-of-sweep ETag revalidation is not viable: a complete multi-thousand-player sweep outlived at least one source generation and restarted after doing all work. Per-scope sealing preserves fail-closed source consistency without requiring every position endpoint to stay unchanged for the full multi-hour production sweep.
 - Player-state health exposes `latest_attempt`, `latest_accepted`, and `latest_completed_failure`. An open retry cannot mask a newer explicit failure; only a still newer accepted run clears it.
 - v0.2.9 owns `/market` and `/events`: market reads only accepted compact frames and events read only accepted/legacy evidence. The legacy `/debug/run-trending` and `/debug/run-players` mutation paths return `410`; unknown inherited routes return `404`.
 - The preview outbox trigger runs only when an observation run transitions to successful finalization. Open and failed evidence never becomes pending delivery.
 - New fundamental evidence is deduplicated within its coherent observation run, while the same injury or role transition in a later run receives a new fingerprint and remains independently alertable.
 - v0.2.9 matches the market cron explicitly; unknown future schedules are logged and ignored.
+
+### Local Workerd rollout validation
+
+- Wrangler 4.135.0 bundled the production entrypoint successfully and applied migrations `0001`–`0003` to a fresh isolated local D1 database.
+- Real Workerd initially exposed an invalid module surface: string cron constants were exported as named Worker entrypoints. v0.2.9 now exports only its default Worker handler.
+- The local market cron completed successfully against Sleeper and finalized an accepted compact frame with 184 players.
+- A complete non-overlapping player-state run against Sleeper sealed all five scopes, finalized `PASS` with 4,363 observed entries, promoted 4,354 unique canonical players atomically, and left zero staged candidates.
+- An intentionally overlapping accelerated continuation attempt failed its cursor guard and remained fail-closed. Normal validation used non-overlapping invocations; production's shortest continuation interval is five minutes.
+- No remote migration, deployment, external alert delivery, or fantasy transaction was performed.

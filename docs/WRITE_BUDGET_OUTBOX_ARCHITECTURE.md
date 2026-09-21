@@ -60,12 +60,12 @@ Every D1 result must be recorded under a stable phase name, not raw parameter va
 | market | retention.prune | bounded snapshot delete |
 | market | frame.insert | one current JSON frame |
 | market | evidence.batch | run-scoped transition evidence; episode state is embedded in the frame |
-| player_state | sweep.active / sweep.init / checkpoint | observation cursor lifecycle |
+| player_state | sweep.active / sweep.init / checkpoint / scope.reset | observation cursor lifecycle and atomic reset of one rotated source scope |
 | player_state | state.load | 25–50-ID canonical-state reads during observation |
 | player_state | candidate.batch | run-scoped changed-state staging; canonical state remains untouched |
 | player_state | promotion.load | staged candidate count after source revalidation |
 | player_state | promotion.commit | one set-based D1 transaction promotes evidence and canonical state, finalizes the run, and removes its candidates |
-| player_state | source.fetch / source.revalidate | network/CPU only; zero D1 rows |
+| player_state | source.fetch / source.revalidate | per-scope network/CPU fetch and seal check; zero D1 rows |
 
 For each phase emit one structured summary after completion: lane, run ID, phase, query count, rows read, rows written, SQL duration, and wall duration. Never emit bound values, payload JSON, player names, tokens, or raw D1 errors. Worker CPU is invocation-level platform telemetry; D1 SQL duration is not Worker CPU and must remain a separate field.
 
