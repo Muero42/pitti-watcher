@@ -1,6 +1,6 @@
 # Fail-closed D1 write budget and alert outbox
 
-Status: implementation foundation, not production-deployed  
+Status: implementation foundation, not production-deployed
 Scope: existing Sleeper market and player-state lanes only
 
 ## Invariants
@@ -10,7 +10,7 @@ Scope: existing Sleeper market and player-state lanes only
 3. A reservation is atomic in D1. Concurrent invocations cannot both spend the same remaining allowance.
 4. A reservation may be released only before any domain write. After an ambiguous or partial write, it remains reserved until an operator reconciles it; leaking allowance is safer than overspending it.
 5. `committed_writes` may never exceed `reserved_writes`.
-6. Alert creation is atomic with new evidence through a D1 trigger and deduplicated by evidence fingerprint.
+6. Alert creation is gated by successful run finalization and deduplicated by evidence fingerprint; failed or open observations never enter the outbox.
 7. The outbox has no delivery consumer in this change. It sends no email, Slack, Discord, push, or other external message.
 8. The watcher observes fantasy state. It does not submit adds, drops, waivers, trades, lineup changes, or any other fantasy transaction.
 
@@ -28,13 +28,14 @@ INSERT reservation ── D1 trigger ──> reject if daily lane budget would b
         v
 execute planned D1 batch; collect rows_read/rows_written/sql_duration_ms per query phase
         |
-        +── new evidence ── D1 trigger ──> pending alert_outbox row (deduplicated)
+        v
+finish and accept coherent watcher run
         |
         v
-settle reservation with observed rows_written
+accepted-run trigger ──> pending alert_outbox rows (deduplicated)
         |
         v
-finish watcher run; publish lane health only after coherent completion
+settle reservation with observed rows_written; publish accepted lane health
 ```
 
 ## Lane budgets
@@ -55,10 +56,10 @@ Every D1 result must be recorded under a stable phase name, not raw parameter va
 | Lane | Phase | Query family |
 | --- | --- | --- |
 | market | run.start / run.finish | `watcher_runs` lifecycle |
-| market | state.load | previous compact frame plus active signal episodes |
+| market | state.load | previous accepted compact frame including signal episodes |
 | market | retention.prune | bounded snapshot delete |
 | market | frame.insert | one current JSON frame |
-| market | evidence.batch / signal_state.batch | transition evidence and episode state |
+| market | evidence.batch | run-scoped transition evidence; episode state is embedded in the frame |
 | player_state | sweep.active / sweep.init / checkpoint | checkpoint lifecycle |
 | player_state | state.load | 100-ID canonical-state reads |
 | player_state | evidence.batch | fundamental evidence; new inserts later create outbox rows |

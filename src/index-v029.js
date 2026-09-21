@@ -7,6 +7,7 @@ import {
 } from './index.js';
 
 const VERSION='0.2.9';
+const MARKET_CRON='*/15 * * * *';
 const PLAYER_STATE_CONTINUATION_CRON='2,7,12,22,37,52 * * * *';
 
 function jsonCors(data,status=200){
@@ -32,8 +33,12 @@ export default {
       ctx.waitUntil(continueChunkedPlayerStateSweep(env));
       return;
     }
-    ctx.waitUntil(runTrendingFrames(env,Date.now(),'scheduled'));
+    if(cron===MARKET_CRON){
+      ctx.waitUntil(runTrendingFrames(env,Date.now(),'scheduled'));
+      return;
+    }
+    console.log(JSON.stringify({event:'watcher_cron_ignored',cron}));
   }
 };
 
-export {PLAYER_STATE_CONTINUATION_CRON};
+export {MARKET_CRON,PLAYER_STATE_CONTINUATION_CRON};

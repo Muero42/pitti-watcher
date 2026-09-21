@@ -1,17 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {evidenceFingerprint,latestMarketFrameRows,marketTransitionPlan,runTrendingFrames} from '../src/index.js';
+import {evidenceFingerprint,latestMarketFrameRows,marketTransitionPlan,processTrendingFrameRun,runTrendingFrames} from '../src/index.js';
 
 const success=(changes=1)=>({success:true,meta:{changes}});
 
 function fixture(t){
   const runs=[];
   const frames=[];
-  const signals=new Map();
   const evidence=new Map();
   const calls={frameInserts:0,framePrunes:0,batchSizes:[]};
   let stage=0;
+  let failEvidence=false;
   const players=Array.from({length:185},(_,i)=>String(i).padStart(4,'0'));
+  const acceptedFrames=()=>frames.filter(frame=>{
+    const run=runs.find(row=>row.id===frame.run_id);
+    return run?.ok===1&&run.finished_at!=null;
+  });
 
   const DB={
     prepare(raw){
@@ -23,18 +27,15 @@ function fixture(t){
             const row={id:runs.length+1,run_type:args[0],started_at:args[1],finished_at:null,ok:0,item_count:0,error:null};
             runs.push(row);return{id:row.id};
           }
-          if(sql.startsWith('SELECT captured_at,player_count,frame_json FROM trending_snapshot_frames')){
-            const row=frames.at(-1);return row?{...row}:null;
+          if(sql.startsWith('SELECT f.captured_at')){
+            const row=acceptedFrames().at(-1);return row?{...row}:null;
           }
           if(sql.startsWith('SELECT finished_at,ok,item_count,error'))return runs.find(row=>row.id===args[0])||null;
           throw new Error(`Unexpected first: ${sql}`);
         },
         async all(){
-          if(sql.startsWith('SELECT captured_at,player_count,frame_json FROM trending_snapshot_frames')){
-            const row=frames.at(-1);return{results:row?[{...row}]:[]};
-          }
-          if(sql.startsWith('SELECT player_id,signal_type,level,episode_started_at,last_transition_at FROM market_signal_state')){
-            return{results:[...signals.values()].map(row=>({...row}))};
+          if(sql.startsWith('SELECT f.captured_at')){
+            const row=acceptedFrames().at(-1);return{results:row?[{...row}]:[]};
           }
           if(sql.startsWith('SELECT player_id,full_name,team,position FROM player_state WHERE player_id IN')){
             return{results:args.map(id=>({player_id:String(id),full_name:`Player ${id}`,team:'AAA',position:'WR'}))};
@@ -43,7 +44,7 @@ function fixture(t){
         },
         async run(){
           if(sql.startsWith('INSERT INTO trending_snapshot_frames')){
-            frames.push({captured_at:args[0],player_count:args[1],frame_json:args[2]});
+            frames.push({captured_at:args[0],run_id:args[1],player_count:args[2],frame_json:args[3],signal_state_json:args[4]});
             frames.sort((a,b)=>a.captured_at-b.captured_at);calls.frameInserts++;return success();
           }
           if(sql.startsWith('DELETE FROM trending_snapshot_frames')){
@@ -64,14 +65,13 @@ function fixture(t){
     },
     async batch(statements){
       calls.batchSizes.push(statements.length);
+      if(failEvidence&&statements.some(stmt=>stmt.sql.startsWith('INSERT INTO evidence_events'))){
+        failEvidence=false;
+        throw new Error('synthetic termination after frame insert');
+      }
       for(const stmt of statements){
         if(stmt.sql.startsWith('INSERT INTO evidence_events')){
-          evidence.set(stmt.args[0],{fingerprint:stmt.args[0],event_type:stmt.args[2],payload_json:stmt.args[12]});
-        }else if(stmt.sql.startsWith('DELETE FROM market_signal_state')){
-          signals.delete(`${stmt.args[0]}:${stmt.args[1]}`);
-        }else if(stmt.sql.startsWith('INSERT INTO market_signal_state')){
-          const [player_id,signal_type,level,episode_started_at,last_transition_at]=stmt.args;
-          signals.set(`${player_id}:${signal_type}`,{player_id,signal_type,level,episode_started_at,last_transition_at});
+          evidence.set(stmt.args[0],{fingerprint:stmt.args[0],event_type:stmt.args[2],payload_json:stmt.args[12],observation_run_id:stmt.args[13]});
         }else throw new Error(`Unexpected batch: ${stmt.sql}`);
       }
       return statements.map(()=>success());
@@ -90,7 +90,10 @@ function fixture(t){
     return new Response(JSON.stringify(rows),{status:200,headers:{'content-type':'application/json'}});
   });
 
-  return{env:{DB,TREND_LIMIT:'200'},runs,frames,signals,evidence,calls,setStage(value){stage=value;}};
+  return{
+    env:{DB,TREND_LIMIT:'200'},runs,frames,evidence,calls,
+    setStage(value){stage=value;},failNextEvidence(){failEvidence=true;}
+  };
 }
 
 test('market lane writes one compact frame, retains two frames, and emits transitions only',async t=>{
@@ -108,7 +111,7 @@ test('market lane writes one compact frame, retains two frames, and emits transi
   assert.deepEqual([...f.evidence.values()].map(row=>row.event_type),[
     'MARKET_ACCELERATION_STARTED','MARKET_ACCELERATION_LEVEL_UP','MARKET_ACCELERATION_ENDED'
   ]);
-  assert.equal(f.signals.size,0);
+  assert.deepEqual(JSON.parse(f.frames.at(-1).signal_state_json),[]);
   assert.ok(f.runs.every(run=>run.ok===1&&run.item_count===185));
 });
 
@@ -127,4 +130,31 @@ test('latest compact market frame is enriched for the companion feed',async t=>{
   assert.equal(rows.length,3);
   assert.equal(rows[0].captured_at,2000);
   assert.match(rows[0].full_name,/Player/);
+});
+
+test('a termination after frame insert cannot promote that frame or its embedded signal generation',async t=>{
+  const f=fixture(t);
+  await runTrendingFrames(f.env,1000,'scheduled');
+  f.setStage(1);
+  f.runs.push({id:2,run_type:'trending:scheduled',started_at:2000,finished_at:null,ok:0,item_count:0,error:null});
+  f.failNextEvidence();
+  await assert.rejects(processTrendingFrameRun(f.env,2000,2),/synthetic termination/);
+  assert.equal(f.frames.at(-1).run_id,2);
+
+  f.setStage(2);
+  await runTrendingFrames(f.env,3000,'scheduled');
+  const accepted=await latestMarketFrameRows(f.env,1);
+  assert.equal(accepted[0].captured_at,3000);
+  assert.equal([...f.evidence.values()].at(-1).event_type,'MARKET_ACCELERATION_STARTED');
+});
+
+test('a completed frame/evidence work phase stays invisible until its run is finalized',async t=>{
+  const f=fixture(t);
+  await runTrendingFrames(f.env,1000,'scheduled');
+  f.setStage(1);
+  f.runs.push({id:2,run_type:'trending:scheduled',started_at:2000,finished_at:null,ok:0,item_count:0,error:null});
+  await processTrendingFrameRun(f.env,2000,2);
+  const visible=await latestMarketFrameRows(f.env,1);
+  assert.equal(visible[0].captured_at,1000);
+  assert.ok([...f.evidence.values()].some(row=>row.observation_run_id===2));
 });

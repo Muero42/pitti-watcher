@@ -11,6 +11,16 @@ export function runLaneStatus(run,maxAgeMs,now=Date.now()){
   return 'PASS';
 }
 
+export function acceptedLaneStatus(latestAttempt,latestAccepted,maxAgeMs,now=Date.now()){
+  if(latestAttempt&&latestAttempt.finished_at!=null&&Number(latestAttempt.ok)!==1){
+    const failedAt=Number(latestAttempt.started_at);
+    const acceptedAt=Number(latestAccepted?.started_at);
+    if(!latestAccepted||!Number.isFinite(acceptedAt)||failedAt>=acceptedAt)return 'FAIL';
+  }
+  if(latestAttempt&&latestAttempt.finished_at==null&&!latestAccepted)return 'FAIL';
+  return runLaneStatus(latestAccepted,maxAgeMs,now);
+}
+
 export function overallLaneGate(marketStatus,playerStateStatus){
   if(marketStatus==='PASS'||playerStateStatus==='PASS')return 'PASS';
   if(marketStatus==='FAIL'||playerStateStatus==='FAIL')return 'FAIL';
@@ -78,19 +88,32 @@ function jsonCors(data,status=200){
   }});
 }
 
+export function acceptedEvidenceSql(){
+  return `
+    SELECT e.id,e.player_id,e.event_type,e.fundamental_or_market,e.occurred_at,e.first_seen_at,e.last_seen_at,
+           e.source,e.original_source,e.authority,e.confidence,e.thesis_link,e.payload_json,e.observation_run_id
+    FROM evidence_events e
+    LEFT JOIN watcher_runs r ON r.id=e.observation_run_id
+    WHERE e.observation_run_id IS NULL OR (r.ok=1 AND r.finished_at IS NOT NULL)
+    ORDER BY e.first_seen_at DESC LIMIT 250
+  `;
+}
+
 export async function companionFeed(request,env,ctx,version=VERSION,marketLoader=null){
-  const [trending,playerState]=await Promise.all([
+  const [marketAttempt,marketAccepted,playerAttempt,playerAccepted]=await Promise.all([
     env.DB.prepare(`SELECT run_type,started_at,finished_at,ok,item_count FROM watcher_runs WHERE run_type='trending:scheduled' ORDER BY id DESC LIMIT 1`).first(),
-    env.DB.prepare(`SELECT run_type,started_at,finished_at,ok,item_count FROM watcher_runs WHERE run_type='player_state:scheduled' ORDER BY id DESC LIMIT 1`).first()
+    env.DB.prepare(`SELECT run_type,started_at,finished_at,ok,item_count FROM watcher_runs WHERE run_type='trending:scheduled' AND ok=1 AND finished_at IS NOT NULL ORDER BY id DESC LIMIT 1`).first(),
+    env.DB.prepare(`SELECT run_type,started_at,finished_at,ok,item_count FROM watcher_runs WHERE run_type='player_state:scheduled' ORDER BY id DESC LIMIT 1`).first(),
+    env.DB.prepare(`SELECT run_type,started_at,finished_at,ok,item_count FROM watcher_runs WHERE run_type='player_state:scheduled' AND ok=1 AND finished_at IS NOT NULL ORDER BY id DESC LIMIT 1`).first()
   ]);
   const now=Date.now();
-  const marketStatus=runLaneStatus(trending,45*60_000,now);
-  const playerStateStatus=runLaneStatus(playerState,36*HOUR,now);
+  const marketStatus=acceptedLaneStatus(marketAttempt,marketAccepted,45*60_000,now);
+  const playerStateStatus=acceptedLaneStatus(playerAttempt,playerAccepted,36*HOUR,now);
   const overall=overallLaneGate(marketStatus,playerStateStatus);
   let events=[],market=[],league=null;
 
   if(overall==='PASS'){
-    const eventPromise=env.DB.prepare(`SELECT id,player_id,event_type,fundamental_or_market,occurred_at,first_seen_at,last_seen_at,source,original_source,authority,confidence,thesis_link,payload_json FROM evidence_events ORDER BY first_seen_at DESC LIMIT 250`).all();
+    const eventPromise=env.DB.prepare(acceptedEvidenceSql()).all();
     const marketPromise=marketStatus!=='PASS'?Promise.resolve([]):marketLoader
       ?marketLoader(env,50)
       :env.DB.prepare(`
@@ -118,8 +141,12 @@ export async function companionFeed(request,env,ctx,version=VERSION,marketLoader
       overall,
       market:marketStatus,
       player_state_status:playerStateStatus,
-      trending:publicRun(trending),
-      player_state:publicRun(playerState)
+      trending:publicRun(marketAccepted),
+      player_state:publicRun(playerAccepted),
+      market_latest_attempt:publicRun(marketAttempt),
+      market_latest_accepted:publicRun(marketAccepted),
+      player_state_latest_attempt:publicRun(playerAttempt),
+      player_state_latest_accepted:publicRun(playerAccepted)
     },
     league,freeAgency,events,market
   });

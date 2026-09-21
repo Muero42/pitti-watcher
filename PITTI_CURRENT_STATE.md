@@ -121,3 +121,12 @@ Draft-only return probability, ADP-return logic and opponent pick prediction are
 - Market polling writes one compact JSON frame per run, retains only current plus previous frame, and writes evidence only for `STARTED`, `LEVEL_UP`, and `ENDED` transitions.
 - At 96 market polls/day, the steady snapshot/retention baseline drops from tens of thousands of row/index mutations to roughly 190 frame mutations/day plus run control and actual signal transitions. The `<10k/day` target is a design projection pending shadow measurement.
 - `tools/inspect-live-schedules.mjs` was a temporary read-only audit helper, not a product or deployment artifact, and is intentionally absent.
+
+### Coherence hardening after review
+
+- Every compact market frame carries its `run_id`; readers and subsequent delta calculations consume only frames whose run is successfully finalized.
+- Market signal episodes are embedded in the frame, so an incomplete invocation cannot mutate a separate global signal generation.
+- New market and chunked player-state evidence carries `observation_run_id`. Feed reads admit only successfully finalized observations; nullable legacy evidence remains explicitly readable.
+- Player-state health exposes `latest_attempt` separately from `latest_accepted`. An open multi-hour sweep keeps a fresh accepted snapshot available, while a newer explicitly failed attempt still closes the lane.
+- The preview outbox trigger runs only when an observation run transitions to successful finalization. Open and failed evidence never becomes pending delivery.
+- v0.2.9 matches the market cron explicitly; unknown future schedules are logged and ignored.

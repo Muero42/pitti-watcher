@@ -85,7 +85,7 @@ function fixture(t,{count=95,failCheckpointOnce=false}={}){
       calls.batchSizes.push(statements.length);
       for(const stmt of statements){
         if(stmt.sql.startsWith('INSERT INTO evidence_events')){
-          evidence.set(stmt.args[0],{fingerprint:stmt.args[0]});
+          evidence.set(stmt.args[0],{fingerprint:stmt.args[0],observation_run_id:stmt.args[13]});
         }else if(stmt.sql.startsWith('UPDATE player_state')){
           const [full_name,team,position,injury_status,practice_participation,depth_chart_order,status,last_seen_at,nextHash,id]=stmt.args;
           Object.assign(state.get(String(id)),{full_name,team,position,injury_status,practice_participation,depth_chart_order,status,last_seen_at,state_hash:nextHash});
@@ -103,7 +103,10 @@ function fixture(t,{count=95,failCheckpointOnce=false}={}){
     return new Response(JSON.stringify(payloads[scope]),{status:200,headers:{etag,'content-type':'application/json'}});
   });
 
-  return{env:{DB,PLAYER_STATE_CHUNK_SIZE:'40',PHASE_LOGGING:'1'},runs,sweeps,evidence,state,calls};
+  return{
+    env:{DB,PLAYER_STATE_CHUNK_SIZE:'40',PHASE_LOGGING:'1'},runs,sweeps,evidence,state,calls,
+    setEtag(scope,value){etags[scope]=value;}
+  };
 }
 
 test('chunked sweep persists a two-dimensional cursor and stays fail-closed through revalidation',async t=>{
@@ -150,8 +153,34 @@ test('an aborted chunk resumes from the last committed cursor without duplicate 
   assert.equal(sweep.seen_count,40);
 });
 
+test('evidence from a sweep rejected at final ETag revalidation remains permanently run-scoped',async t=>{
+  const f=fixture(t,{count:40});
+  t.mock.method(console,'log',()=>{});
+  await beginChunkedPlayerStateSweep(f.env,NOW);
+  for(let i=0;i<4;i++)await continueChunkedPlayerStateSweep(f.env);
+  assert.equal(f.sweeps.get(1).next_index,5);
+  assert.ok([...f.evidence.values()].every(row=>row.observation_run_id===1));
+  f.setEtag('WR','"WR-rotated"');
+  await continueChunkedPlayerStateSweep(f.env);
+  assert.equal(f.runs[0].ok,0);
+  const visible=[...f.evidence.values()].filter(event=>{
+    const run=f.runs.find(row=>row.id===event.observation_run_id);
+    return run?.ok===1&&run.finished_at!=null;
+  });
+  assert.deepEqual(visible,[]);
+});
+
 test('v0.2.9 health identifies the chunked-frame entrypoint',async()=>{
   const response=await v029Worker.fetch(new Request('https://local.invalid/health'),{});
   assert.equal(response.status,200);
   assert.equal((await response.json()).version,'0.2.9');
+});
+
+test('v0.2.9 ignores unknown cron expressions instead of starting market work',async t=>{
+  const waits=[];
+  const logs=[];
+  t.mock.method(console,'log',value=>logs.push(JSON.parse(value)));
+  await v029Worker.scheduled({cron:'3 3 * * 0'}, {}, {waitUntil(promise){waits.push(promise);}});
+  assert.equal(waits.length,0);
+  assert.deepEqual(logs,[{event:'watcher_cron_ignored',cron:'3 3 * * 0'}]);
 });

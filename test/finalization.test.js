@@ -223,7 +223,7 @@ test('players: 12k-player sweep batches 1000 changes with exact evidence identit
     .update(JSON.stringify(['0','PLAYER_STATE_CHANGED','Sleeper Player Data',JSON.parse(expectedPayload)]))
     .digest('hex');
   assert.deepEqual(first, [expectedFingerprint,'0','PLAYER_STATE_CHANGED','fundamental',NOW,NOW,NOW,
-    'Sleeper Player Data','Sleeper Player Data',0.75,0.8,'roster_context',expectedPayload]);
+    'Sleeper Player Data','Sleeper Player Data',0.75,0.8,'roster_context',expectedPayload,null]);
 });
 
 test('players: intermediate evidence batch failure writes no canonical state and finalizes FAIL', async t => {

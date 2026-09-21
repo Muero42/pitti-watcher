@@ -5,7 +5,6 @@ const LANES = new Set(['market', 'player_state']);
 // metadata proves these bounds conservative for the promoted schema.
 export const BILLABLE_WRITE_ESTIMATES = Object.freeze({
   marketFrame: 1,
-  marketSignalStateMutation: 1,
   evidenceWithOutbox: 6,
   playerStateInsert: 1,
   playerStateUpdate: 1,
@@ -65,7 +64,6 @@ export function estimateBillableWrites(counts = {}) {
   };
   return (
     count('marketFrames') * BILLABLE_WRITE_ESTIMATES.marketFrame +
-    count('marketSignalStateMutations') * BILLABLE_WRITE_ESTIMATES.marketSignalStateMutation +
     count('evidenceInserts') * BILLABLE_WRITE_ESTIMATES.evidenceWithOutbox +
     count('playerStateInserts') * BILLABLE_WRITE_ESTIMATES.playerStateInsert +
     count('playerStateUpdates') * BILLABLE_WRITE_ESTIMATES.playerStateUpdate +

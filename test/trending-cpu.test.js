@@ -10,7 +10,7 @@ const WINDOWS = ['add/1', 'add/3', 'add/6', 'add/24', 'drop/1', 'drop/6', 'drop/
 const SNAPSHOT = ['captured_at','player_id','adds_1h','adds_3h','adds_6h','adds_24h','drops_1h','drops_6h','drops_24h'];
 const CURRENT = ['player_id','adds_1h','adds_3h','adds_24h','drops_1h','drops_6h','drops_24h'];
 const PREVIOUS = ['player_id','adds_1h','drops_1h'];
-const EVIDENCE = ['fingerprint','player_id','event_type','fundamental_or_market','occurred_at','first_seen_at','last_seen_at','source','original_source','authority','confidence','thesis_link','payload_json'];
+const EVIDENCE = ['fingerprint','player_id','event_type','fundamental_or_market','occurred_at','first_seen_at','last_seen_at','source','original_source','authority','confidence','thesis_link','payload_json','observation_run_id'];
 const entry = (player_id, count) => ({ player_id, count });
 const previous = (player_id, adds_1h = 10, drops_1h = 8) => ({ captured_at: BEFORE, player_id, adds_1h, drops_1h });
 
@@ -30,7 +30,7 @@ function fixture(t, options = {}) {
       const isEvidence = sql.startsWith('INSERT INTO evidence_events');
       if (isEvidence) {
         fail('prepareEvidence'); calls.prepares++;
-        assert.equal(sql, `INSERT INTO evidence_events(${EVIDENCE.join(',')}) VALUES(${EVIDENCE.map((_,i) => `?${i+1}`).join(',')}) ON CONFLICT(fingerprint) DO UPDATE SET last_seen_at=excluded.last_seen_at`);
+        assert.equal(sql, `INSERT INTO evidence_events(${EVIDENCE.join(',')}) VALUES(${EVIDENCE.map((_,i) => `?${i+1}`).join(',')}) ON CONFLICT(fingerprint) DO UPDATE SET last_seen_at=excluded.last_seen_at, observation_run_id=excluded.observation_run_id`);
       }
       const statement = (args = []) => ({
         sql, args,
@@ -168,7 +168,7 @@ test('projected numeric previous ID matches string current ID and both payloads 
     assert.deepEqual({ ...event, fingerprint: undefined, payload_json: undefined }, {
       fingerprint: undefined, payload_json: undefined, player_id:'1', event_type:type, fundamental_or_market:'market',
       occurred_at:AT, first_seen_at:AT, last_seen_at:AT, source:'Sleeper Trending', original_source:'Sleeper Trending',
-      authority:0.95, confidence, thesis_link:'market_recognition'
+      authority:0.95, confidence, thesis_link:'market_recognition', observation_run_id:null
     });
   }
   assert.equal(f.calls.prepares, 1); assert.equal(f.calls.binds, 2); assert.equal(f.calls.runs, 2); assert.equal(f.calls.maxActive, 1);

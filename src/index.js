@@ -583,12 +583,17 @@ function trendingRows(ids, windows) {
 }
 
 function parseTrendingFrame(row) {
-  if (!row) return { captured_at: null, rows: [] };
-  let rows;
-  try { rows = JSON.parse(String(row.frame_json || '[]')); }
+  if (!row) return { captured_at: null, run_id: null, rows: [], signals: [] };
+  let rows, signals;
+  try {
+    rows = JSON.parse(String(row.frame_json || '[]'));
+    signals = JSON.parse(String(row.signal_state_json || '[]'));
+  }
   catch (_) { throw new Error('TRENDING_FRAME_INVALID'); }
-  if (!Array.isArray(rows) || rows.length !== Number(row.player_count)) throw new Error('TRENDING_FRAME_INVALID');
-  return { captured_at: Number(row.captured_at), rows };
+  if (!Array.isArray(rows) || rows.length !== Number(row.player_count) || !Array.isArray(signals)) {
+    throw new Error('TRENDING_FRAME_INVALID');
+  }
+  return { captured_at: Number(row.captured_at), run_id: Number(row.run_id), rows, signals };
 }
 
 function marketSignalLevel(signalType, row, previous) {
@@ -664,6 +669,24 @@ function marketTransitionPlan(currentRows, previousRows, storedSignals, at) {
   return { events, stateChanges };
 }
 
+function nextMarketSignalState(storedSignals, stateChanges) {
+  const next = new Map((storedSignals || []).map(row => [`${row.player_id}:${row.signal_type}`, {...row}]));
+  for (const change of stateChanges || []) {
+    const key = `${change.player_id}:${change.signal_type}`;
+    if (change.action === 'delete') next.delete(key);
+    else next.set(key, {
+      player_id: change.player_id,
+      signal_type: change.signal_type,
+      level: change.level,
+      episode_started_at: change.episode_started_at,
+      last_transition_at: change.last_transition_at
+    });
+  }
+  return [...next.values()].sort((a,b) =>
+    String(a.player_id).localeCompare(String(b.player_id)) || String(a.signal_type).localeCompare(String(b.signal_type))
+  );
+}
+
 async function runStatementBatches(env, lane, phase, context, statements, size = 75) {
   const results = [];
   await runPhase(env, lane, phase, context, async () => {
@@ -675,53 +698,52 @@ async function runStatementBatches(env, lane, phase, context, statements, size =
   return results;
 }
 
+async function processTrendingFrameRun(env, at, runId) {
+  const context = { run_id: runId };
+  const limit = clampInt(env.TREND_LIMIT, 20, 1000, 200);
+  const [a1,a3,a6,a24,d1,d6,d24] = await runPhase(env, 'market', 'source.fetch', context, () => Promise.all([
+    trendingWindow(env,'add',1,limit), trendingWindow(env,'add',3,limit), trendingWindow(env,'add',6,limit), trendingWindow(env,'add',24,limit),
+    trendingWindow(env,'drop',1,limit), trendingWindow(env,'drop',6,limit), trendingWindow(env,'drop',24,limit)
+  ]));
+  const ids = collectTrendingIds(a1, a3, a6, a24, d1, d6, d24);
+  const rows = trendingRows(ids, { a1, a3, a6, a24, d1, d6, d24 });
+  const previousFrameResult = await runPhase(env, 'market', 'state.load', context, () => env.DB.prepare(`
+    SELECT f.captured_at,f.run_id,f.player_count,f.frame_json,f.signal_state_json
+    FROM trending_snapshot_frames f
+    JOIN watcher_runs r ON r.id=f.run_id
+    WHERE r.ok=1 AND r.finished_at IS NOT NULL
+    ORDER BY f.captured_at DESC LIMIT 1
+  `).all());
+  const previousFrame = parseTrendingFrame(previousFrameResult.results?.[0] || null);
+  const plan = marketTransitionPlan(rows, previousFrame.rows, previousFrame.signals, at);
+  const nextSignals = nextMarketSignalState(previousFrame.signals, plan.stateChanges);
+
+  const evidence = [];
+  let evidenceStatement;
+  for (const event of plan.events) {
+    evidenceStatement ??= env.DB.prepare(EVIDENCE_UPSERT_SQL);
+    evidence.push(await bindEvidence(evidenceStatement, { ...event, observation_run_id: runId }));
+  }
+  await runPhase(env, 'market', 'frame.insert', context, () => env.DB.prepare(`
+    INSERT INTO trending_snapshot_frames(captured_at,run_id,player_count,frame_json,signal_state_json)
+    VALUES(?1,?2,?3,?4,?5)
+  `).bind(at, runId, rows.length, JSON.stringify(rows), JSON.stringify(nextSignals)).run());
+  await runStatementBatches(env, 'market', 'evidence.batch', context, evidence);
+  if (previousFrame.captured_at !== null) {
+    await runPhase(env, 'market', 'retention.prune', context, () => env.DB.prepare(`
+      DELETE FROM trending_snapshot_frames
+      WHERE captured_at < ?1
+    `).bind(previousFrame.captured_at).run());
+  }
+  return { ok: true, captured_at: at, players: rows.length, transitions: plan.events.length };
+}
+
 async function runTrendingFrames(env, at, source = 'internal') {
   const runId = await startRun(env, 'trending', at, source);
-  const context = { run_id: runId };
   try {
-    const limit = clampInt(env.TREND_LIMIT, 20, 1000, 200);
-    const [a1,a3,a6,a24,d1,d6,d24] = await runPhase(env, 'market', 'source.fetch', context, () => Promise.all([
-      trendingWindow(env,'add',1,limit), trendingWindow(env,'add',3,limit), trendingWindow(env,'add',6,limit), trendingWindow(env,'add',24,limit),
-      trendingWindow(env,'drop',1,limit), trendingWindow(env,'drop',6,limit), trendingWindow(env,'drop',24,limit)
-    ]));
-    const ids = collectTrendingIds(a1, a3, a6, a24, d1, d6, d24);
-    const rows = trendingRows(ids, { a1, a3, a6, a24, d1, d6, d24 });
-    const [previousFrameResult, signalResult] = await runPhase(env, 'market', 'state.load', context, () => Promise.all([
-      env.DB.prepare(`SELECT captured_at,player_count,frame_json FROM trending_snapshot_frames ORDER BY captured_at DESC LIMIT 1`).all(),
-      env.DB.prepare(`SELECT player_id,signal_type,level,episode_started_at,last_transition_at FROM market_signal_state`).all()
-    ]));
-    const previousFrameRow = previousFrameResult.results?.[0] || null;
-    const previousFrame = parseTrendingFrame(previousFrameRow);
-    const plan = marketTransitionPlan(rows, previousFrame.rows, signalResult.results || [], at);
-
-    const evidence = [];
-    let evidenceStatement;
-    for (const event of plan.events) {
-      evidenceStatement ??= env.DB.prepare(EVIDENCE_UPSERT_SQL);
-      evidence.push(await bindEvidence(evidenceStatement, event));
-    }
-    const state = plan.stateChanges.map(change => change.action === 'delete'
-      ? env.DB.prepare(`DELETE FROM market_signal_state WHERE player_id=?1 AND signal_type=?2`).bind(change.player_id, change.signal_type)
-      : env.DB.prepare(`
-          INSERT INTO market_signal_state(player_id,signal_type,level,episode_started_at,last_transition_at)
-          VALUES(?1,?2,?3,?4,?5)
-          ON CONFLICT(player_id,signal_type) DO UPDATE SET
-            level=excluded.level,episode_started_at=excluded.episode_started_at,last_transition_at=excluded.last_transition_at
-        `).bind(change.player_id, change.signal_type, change.level, change.episode_started_at, change.last_transition_at));
-
-    await runPhase(env, 'market', 'frame.insert', context, () => env.DB.prepare(`
-      INSERT INTO trending_snapshot_frames(captured_at,player_count,frame_json) VALUES(?1,?2,?3)
-    `).bind(at, rows.length, JSON.stringify(rows)).run());
-    await runStatementBatches(env, 'market', 'evidence.batch', context, evidence);
-    await runStatementBatches(env, 'market', 'signal_state.batch', context, state);
-    if (previousFrame.captured_at !== null) {
-      await runPhase(env, 'market', 'retention.prune', context, () => env.DB.prepare(`
-        DELETE FROM trending_snapshot_frames
-        WHERE captured_at < ?1
-      `).bind(previousFrame.captured_at).run());
-    }
-    await safeFinishRun(env, runId, true, rows.length);
-    return { ok: true, captured_at: at, players: rows.length, transitions: plan.events.length };
+    const result = await processTrendingFrameRun(env, at, runId);
+    await safeFinishRun(env, runId, true, result.players);
+    return result;
   } catch (error) {
     return rejectWorkFailure(env, runId, error);
   }
@@ -729,7 +751,11 @@ async function runTrendingFrames(env, at, source = 'internal') {
 
 async function latestMarketFrameRows(env, limit = 50) {
   const frame = parseTrendingFrame(await env.DB.prepare(`
-    SELECT captured_at,player_count,frame_json FROM trending_snapshot_frames ORDER BY captured_at DESC LIMIT 1
+    SELECT f.captured_at,f.run_id,f.player_count,f.frame_json,f.signal_state_json
+    FROM trending_snapshot_frames f
+    JOIN watcher_runs r ON r.id=f.run_id
+    WHERE r.ok=1 AND r.finished_at IS NOT NULL
+    ORDER BY f.captured_at DESC LIMIT 1
   `).first());
   const rows = frame.rows
     .sort((a,b) => Number(b.adds_1h || 0)-Number(a.adds_1h || 0) || Number(b.adds_3h || 0)-Number(a.adds_3h || 0))
@@ -840,6 +866,7 @@ async function persistPlayerStateEntries(env, at, entries, existingRows, phaseCo
       authority: 0.75,
       confidence: 0.8,
       thesis_link: inferThesisLink(diffs),
+      observation_run_id: phaseContext?.run_id ?? null,
       payload: { player: s.full_name, team: s.team, position: s.position, diffs }
     }));
   }
@@ -1041,9 +1068,11 @@ function inferThesisLink(diffs) {
 }
 
 const EVIDENCE_UPSERT_SQL = `
-    INSERT INTO evidence_events(fingerprint,player_id,event_type,fundamental_or_market,occurred_at,first_seen_at,last_seen_at,source,original_source,authority,confidence,thesis_link,payload_json)
-    VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)
-    ON CONFLICT(fingerprint) DO UPDATE SET last_seen_at=excluded.last_seen_at
+    INSERT INTO evidence_events(fingerprint,player_id,event_type,fundamental_or_market,occurred_at,first_seen_at,last_seen_at,source,original_source,authority,confidence,thesis_link,payload_json,observation_run_id)
+    VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)
+    ON CONFLICT(fingerprint) DO UPDATE SET
+      last_seen_at=excluded.last_seen_at,
+      observation_run_id=excluded.observation_run_id
   `;
 
 async function upsertEvidence(env, e, prepareEvidence = () => env.DB.prepare(EVIDENCE_UPSERT_SQL)) {
@@ -1054,7 +1083,7 @@ async function upsertEvidence(env, e, prepareEvidence = () => env.DB.prepare(EVI
 async function bindEvidence(statement, e) {
   const fingerprint = await evidenceFingerprint(e);
   const payload = JSON.stringify(e.payload || {});
-  return statement.bind(fingerprint,e.player_id||null,e.event_type,e.fundamental_or_market,e.occurred_at||null,e.first_seen_at,e.last_seen_at,e.source,e.original_source,e.authority,e.confidence,e.thesis_link||null,payload);
+  return statement.bind(fingerprint,e.player_id||null,e.event_type,e.fundamental_or_market,e.occurred_at||null,e.first_seen_at,e.last_seen_at,e.source,e.original_source,e.authority,e.confidence,e.thesis_link||null,payload,e.observation_run_id??null);
 }
 
 async function sha256(text) {
@@ -1194,5 +1223,5 @@ async function continueChunkedPlayerStateSweep(env) {
   }
 }
 
-export { playerStateOf, trackedState, stateHash, inferThesisLink, marketSignals, marketTransitionPlan, evidenceFingerprint, depthChartOrderOf, normalizeRunType, normalizeRunSource, runsQuery, ownershipStatus, buildFreeAgencyRadar, resolveLeagueContext, previousTrendingSnapshotSql };
-export { safeFinishRun, runTrending, runTrendingFrames, latestMarketFrameRows, runPlayerState, beginPlayerStateSweep, continuePlayerStateSweep, beginChunkedPlayerStateSweep, continueChunkedPlayerStateSweep, processPlayerStateSweepChunk };
+export { playerStateOf, trackedState, stateHash, inferThesisLink, marketSignals, marketTransitionPlan, nextMarketSignalState, evidenceFingerprint, depthChartOrderOf, normalizeRunType, normalizeRunSource, runsQuery, ownershipStatus, buildFreeAgencyRadar, resolveLeagueContext, previousTrendingSnapshotSql };
+export { safeFinishRun, runTrending, runTrendingFrames, processTrendingFrameRun, latestMarketFrameRows, runPlayerState, beginPlayerStateSweep, continuePlayerStateSweep, beginChunkedPlayerStateSweep, continueChunkedPlayerStateSweep, processPlayerStateSweepChunk };

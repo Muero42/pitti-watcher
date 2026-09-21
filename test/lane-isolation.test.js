@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {runLaneStatus,overallLaneGate,filterLaneEvents,buildFreeAgencyRadar} from '../src/index-v027.js';
+import {acceptedLaneStatus,runLaneStatus,overallLaneGate,filterLaneEvents,buildFreeAgencyRadar} from '../src/index-v027.js';
 
 const NOW=1_800_000_000_000;
 const okRun=age=>({ok:1,started_at:NOW-age,finished_at:NOW-age+1000,item_count:10});
@@ -46,4 +46,12 @@ test('free-agency radar still excludes owned players under a single healthy lane
 test('all unhealthy lanes remain fail-closed',()=>{
   assert.equal(overallLaneGate('FAIL','STALE'),'FAIL');
   assert.equal(overallLaneGate('WAIT_FOR_SCHEDULED_EVIDENCE','STALE'),'STALE');
+});
+
+test('an open sweep keeps the last accepted observation available while an explicit failure closes it',()=>{
+  const accepted=okRun(2*3600_000);
+  const open={ok:0,started_at:NOW-1000,finished_at:null,item_count:0};
+  assert.equal(acceptedLaneStatus(open,accepted,36*3600_000,NOW),'PASS');
+  assert.equal(acceptedLaneStatus(failedRun,accepted,36*3600_000,NOW),'FAIL');
+  assert.equal(acceptedLaneStatus(open,null,36*3600_000,NOW),'FAIL');
 });

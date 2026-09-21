@@ -100,23 +100,28 @@ CREATE INDEX IF NOT EXISTS idx_alert_outbox_delivery
 
 -- The outbox is populated only from evidence that the existing Sleeper lanes already
 -- produce. There is intentionally no sender, external source, or transaction executor.
-CREATE TRIGGER IF NOT EXISTS trg_evidence_to_alert_outbox
-AFTER INSERT ON evidence_events
-WHEN NEW.fundamental_or_market IN ('market', 'fundamental')
+CREATE TRIGGER IF NOT EXISTS trg_accepted_run_to_alert_outbox
+AFTER UPDATE OF finished_at, ok ON watcher_runs
+WHEN NEW.ok=1 AND NEW.finished_at IS NOT NULL
+  AND (OLD.ok!=1 OR OLD.finished_at IS NULL)
 BEGIN
   INSERT INTO alert_outbox(
     dedupe_key, evidence_fingerprint, lane, topic, player_id, occurred_at,
     payload_json, available_at, created_at, updated_at
-  ) VALUES(
-    NEW.fingerprint,
-    NEW.fingerprint,
-    CASE WHEN NEW.fundamental_or_market='market' THEN 'market' ELSE 'player_state' END,
-    NEW.event_type,
-    NEW.player_id,
-    NEW.occurred_at,
-    NEW.payload_json,
-    NEW.first_seen_at,
-    NEW.first_seen_at,
-    NEW.first_seen_at
-  ) ON CONFLICT(dedupe_key) DO NOTHING;
+  )
+  SELECT
+    e.fingerprint,
+    e.fingerprint,
+    CASE WHEN e.fundamental_or_market='market' THEN 'market' ELSE 'player_state' END,
+    e.event_type,
+    e.player_id,
+    e.occurred_at,
+    e.payload_json,
+    NEW.finished_at,
+    NEW.finished_at,
+    NEW.finished_at
+  FROM evidence_events e
+  WHERE e.observation_run_id=NEW.id
+    AND e.fundamental_or_market IN ('market', 'fundamental')
+  ON CONFLICT(dedupe_key) DO NOTHING;
 END;

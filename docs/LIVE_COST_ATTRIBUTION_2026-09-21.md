@@ -1,7 +1,7 @@
 # Live Watcher health and cost attribution — 2026-09-21
 
-Observation window: Cloudflare D1 Insights, trailing 24 hours; live endpoints and tail sampled around 07:08–07:15 UTC.  
-Production deployment: Worker version `c04a4018-ab00-4023-b16b-08d403f4f2ac`, deployed 2026-09-19 15:51:54 UTC.  
+Observation window: Cloudflare D1 Insights, trailing 24 hours; live endpoints and tail sampled around 07:08–07:15 UTC.
+Production deployment: Worker version `c04a4018-ab00-4023-b16b-08d403f4f2ac`, deployed 2026-09-19 15:51:54 UTC.
 Source at audit: canonical `main` `749ba52`, package/health version `0.2.8`.
 
 ## Live health
