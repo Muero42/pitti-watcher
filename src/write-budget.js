@@ -4,17 +4,19 @@ const LANES = new Set(['market', 'player_state']);
 // Shadow-calibration inputs only. Do not activate enforcement until observed D1
 // metadata proves these bounds conservative for the promoted schema.
 export const BILLABLE_WRITE_ESTIMATES = Object.freeze({
-  marketFrame: 1,
-  evidenceWithOutbox: 6,
+  marketFrame: 2,
+  evidenceWithOutbox: 8,
+  playerStateScopeFrameInsert: 1,
+  playerStateScopeFrameDelete: 1,
   playerStateCandidateStage: 1,
   playerStateCandidateDelete: 1,
-  playerStateInsert: 1,
+  playerStateInsert: 2,
   playerStateUpdate: 1,
-  retentionDelete: 1,
+  retentionDelete: 2,
   checkpoint: 1,
   runStart: 2,
   runFinish: 1,
-  budgetControl: 2
+  budgetControl: 10
 });
 
 function positiveInt(value, code) {
@@ -67,6 +69,8 @@ export function estimateBillableWrites(counts = {}) {
   return (
     count('marketFrames') * BILLABLE_WRITE_ESTIMATES.marketFrame +
     count('evidenceInserts') * BILLABLE_WRITE_ESTIMATES.evidenceWithOutbox +
+    count('playerStateScopeFramesInserted') * BILLABLE_WRITE_ESTIMATES.playerStateScopeFrameInsert +
+    count('playerStateScopeFramesDeleted') * BILLABLE_WRITE_ESTIMATES.playerStateScopeFrameDelete +
     count('playerStateCandidatesStaged') * BILLABLE_WRITE_ESTIMATES.playerStateCandidateStage +
     count('playerStateCandidatesDeleted') * BILLABLE_WRITE_ESTIMATES.playerStateCandidateDelete +
     count('playerStateInserts') * BILLABLE_WRITE_ESTIMATES.playerStateInsert +

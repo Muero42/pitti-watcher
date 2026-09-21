@@ -56,6 +56,8 @@ test('billable estimates include outbox and budget-control overhead', () => {
   const estimate = estimateBillableWrites({
     marketFrames: 1,
     evidenceInserts: 10,
+    playerStateScopeFramesInserted: 5,
+    playerStateScopeFramesDeleted: 5,
     playerStateCandidatesStaged: 3,
     playerStateCandidatesDeleted: 3,
     retentionDeletes: 1,
@@ -65,8 +67,14 @@ test('billable estimates include outbox and budget-control overhead', () => {
   assert.equal(estimate,
     BILLABLE_WRITE_ESTIMATES.marketFrame +
     10 * BILLABLE_WRITE_ESTIMATES.evidenceWithOutbox +
+    5 * BILLABLE_WRITE_ESTIMATES.playerStateScopeFrameInsert +
+    5 * BILLABLE_WRITE_ESTIMATES.playerStateScopeFrameDelete +
     3 * BILLABLE_WRITE_ESTIMATES.playerStateCandidateStage +
-    3 * BILLABLE_WRITE_ESTIMATES.playerStateCandidateDelete + 1 + 2 + 1 + 2);
+    3 * BILLABLE_WRITE_ESTIMATES.playerStateCandidateDelete +
+    BILLABLE_WRITE_ESTIMATES.retentionDelete +
+    BILLABLE_WRITE_ESTIMATES.runStart +
+    BILLABLE_WRITE_ESTIMATES.runFinish +
+    BILLABLE_WRITE_ESTIMATES.budgetControl);
 });
 
 test('reservation is a single confirmed insert and refuses an oversized request before D1', async () => {

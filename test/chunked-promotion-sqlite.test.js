@@ -41,6 +41,7 @@ test('active migrations and preview outbox accept the atomic set-based promotion
     'migrations/0001_init.sql',
     'migrations/0002_player_state_sweeps.sql',
     'migrations/0003_chunked_player_state_and_market_frames.sql',
+    'migrations/0004_player_state_scope_frames.sql',
     'docs/sql/write_budget_alert_outbox_preview.sql'
   ])db.exec(readFileSync(new URL(`../${path}`,import.meta.url),'utf8'));
 
@@ -64,6 +65,10 @@ test('active migrations and preview outbox accept the atomic set-based promotion
       evidence_fingerprint,evidence_thesis_link,evidence_payload_json
     ) VALUES(1,'p1','RB',?1,?2,?3,?4,?5,?6,?7,?8,?9,'fingerprint','availability_contingency','{"player":"Player"}')
   `).run(nextState.full_name,nextState.team,nextState.position,nextState.injury_status,nextState.practice_participation,nextState.depth_chart_order,nextState.status,stateHash(nextState),at);
+  db.prepare(`
+    INSERT INTO player_state_scope_frames(run_id,source_scope,captured_at,source_etag,player_count,frame_json)
+    VALUES(1,'RB',?1,'"etag"',1,'[["p1",{"position":"RB"}]]')
+  `).run(at);
 
   const result=await processPlayerStateSweepChunk({DB:d1For(db),PHASE_LOGGING:'0'}, {
     run_id:1,source_etag:'{}',total_entries:5,next_index:5,scope_offset:0,scope_etag:null,
@@ -77,6 +82,7 @@ test('active migrations and preview outbox accept the atomic set-based promotion
   assert.equal(db.prepare('SELECT COUNT(*) count FROM evidence_events WHERE observation_run_id=1').get().count,1);
   assert.equal(db.prepare('SELECT COUNT(*) count FROM alert_outbox').get().count,1);
   assert.equal(db.prepare('SELECT COUNT(*) count FROM player_state_candidates WHERE run_id=1').get().count,0);
+  assert.equal(db.prepare('SELECT COUNT(*) count FROM player_state_scope_frames WHERE run_id=1').get().count,0);
 
   db.prepare(`INSERT INTO watcher_runs(id,run_type,started_at) VALUES(2,'player_state:scheduled',?1)`).run(at+1);
   db.prepare(`

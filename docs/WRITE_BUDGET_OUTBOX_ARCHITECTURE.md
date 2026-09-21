@@ -47,7 +47,7 @@ The budget window is a UTC day. Limits are mandatory environment variables:
 
 The initial limits should be chosen below the account-level allowance and leave a fixed control-plane reserve for run finalization, budget bookkeeping, migrations, and manual recovery. Do not set the two lane limits to the full provider quota.
 
-`src/write-budget.js` deliberately uses provisional conservative multipliers derived from the current schema/index shape and live D1 observations, including candidate staging and deletion. They are not treated as billing truth. Before enforcement is activated, validate the multipliers in a disposable/non-production database using `docs/sql/write_budget_alert_outbox_preview.sql`; the outbox trigger adds writes to a new evidence insert.
+`src/write-budget.js` uses provisional conservative multipliers derived from the current schema/index shape and live/local D1 observations, including immutable scope frames, candidate staging/deletion, primary indexes, and outbox indexes. The 2026-09-21 frozen-frame bootstrap measured 13,070 rows written for the atomic promotion of 4,354 new canonical players plus candidate cleanup. The multipliers remain shadow estimates, not billing truth. Before enforcement is activated, validate them in a disposable/non-production database using `docs/sql/write_budget_alert_outbox_preview.sql`; the outbox trigger adds indexed writes to each new evidence insert.
 
 ## Query attribution
 
@@ -60,12 +60,13 @@ Every D1 result must be recorded under a stable phase name, not raw parameter va
 | market | retention.prune | bounded snapshot delete |
 | market | frame.insert | one current JSON frame |
 | market | evidence.batch | run-scoped transition evidence; episode state is embedded in the frame |
-| player_state | sweep.active / sweep.init / checkpoint / scope.reset | observation cursor lifecycle and atomic reset of one rotated source scope |
+| player_state | sweep.active / sweep.init / checkpoint / sweep.seal | observation cursor lifecycle and completion of all frozen scopes |
+| player_state | scope.frame.load / scope.frame.capture | read or create one immutable, normalized, run-bound position snapshot |
 | player_state | state.load | 25–50-ID canonical-state reads during observation |
 | player_state | candidate.batch | run-scoped changed-state staging; canonical state remains untouched |
 | player_state | promotion.load | staged candidate count after source revalidation |
 | player_state | promotion.commit | one set-based D1 transaction promotes evidence and canonical state, finalizes the run, and removes its candidates |
-| player_state | source.fetch / source.revalidate | per-scope network/CPU fetch and seal check; zero D1 rows |
+| player_state | source.fetch | one network/CPU fetch when a scope frame is captured; later chunks never refetch that scope |
 
 For each phase emit one structured summary after completion: lane, run ID, phase, query count, rows read, rows written, SQL duration, and wall duration. Never emit bound values, payload JSON, player names, tokens, or raw D1 errors. Worker CPU is invocation-level platform telemetry; D1 SQL duration is not Worker CPU and must remain a separate field.
 
@@ -77,13 +78,13 @@ pending -> leased -> sent
               \-> dead    (terminal policy decision)
 ```
 
-Only the schema/trigger preview for `pending` creation exists now. A future activation must also enforce a hard pending-row bound before enabling the trigger: either reject the evidence transaction fail-closed when the bound is reached, or reserve outbox capacity atomically with the lane write budget. Silent eviction is forbidden. A future sender must use a lease token, bounded batch size, retry ceiling, and an idempotency key equal to `dedupe_key`. Adding a destination or sender is a separate change requiring explicit authorization and destination-specific secrets. `sent` must mean an acknowledged external delivery, never merely an attempted fetch.
+The preview schema now contains a singleton `alert_outbox_policy` and a `BEFORE INSERT` trigger with a calibration default of 1,000 pending rows. Missing policy or a full queue aborts run acceptance atomically; silent eviction is forbidden. The value is preview-only and must be chosen explicitly for production from measured traffic and reserved D1 capacity. A future sender must use a lease token, bounded batch size, retry ceiling, and an idempotency key equal to `dedupe_key`. Adding a destination or sender is a separate change requiring explicit authorization and destination-specific secrets. `sent` must mean an acknowledged external delivery, never merely an attempted fetch.
 
 ## Rollout gates
 
 1. Apply `docs/sql/write_budget_alert_outbox_preview.sql` only to a disposable/non-production database and run the reservation/outbox tests.
 2. Deploy phase-level logging in shadow mode; compare provisional estimates with observed `rows_written` for at least one representative daily sweep and market window.
-3. Define and test the pending-outbox hard bound; keep both trigger and reservation path inactive until then.
+3. Recalibrate and review the tested pending-outbox hard bound; keep both trigger and reservation path inactive until then.
 4. Promote reviewed SQL into a new migration, set lane limits with control-plane headroom, and enable reservation before any domain write.
 5. Exercise budget exhaustion and ambiguous-write tests. The lane must end `FAIL`; no unreserved alert may become eligible.
 6. Deploy without any outbox consumer. Verify pending rows and deduplication only.

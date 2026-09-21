@@ -48,3 +48,19 @@ The market lane is the write driver. Snapshot rows, evidence upserts, and retent
 2. Attribute run-control writes separately so failure reporting remains possible after a lane budget closes.
 3. Keep CPU and D1 SQL duration separate. Per-query CPU does not exist as a D1 metric; per-query rows and SQL duration plus invocation-level Worker CPU are the defensible attribution boundary.
 4. Do not attach an external sender to the outbox until reservation enforcement and deduplication have been validated in production-like traffic.
+
+## v0.2.9 rollout observation (13:20–13:52 UTC)
+
+- Migration `0003` and Worker version `95ae7e6e-f282-4c55-bdb3-ca5bf7caed49` deployed successfully; `/health` reported 0.2.9.
+- Market run `4020`: 183 players, accepted compact frame, 9 ms Worker CPU, 3,522 ms wall. The first compact run performed a one-time legacy bootstrap read of 40,211 rows; frame insert was one query with 2 rows read / 2 rows written.
+- Market run `4021`: 181 players and a second accepted compact frame. The companion feed returned 50 compact market rows and selected `4021` as both latest attempt and latest accepted run.
+- Player continuation for run `3983`: 10 ms Worker CPU, 12,381 ms wall; source fetch consumed 10,904 ms. The upstream RB ETag rotated after offset 40, and the fail-closed scope reset was attempted.
+- D1 rejected that reset with `YOUR_ACCOUNT_HAS_EXCEEDED_D1_S_FREE_TIER_DAILY_ROW_WRITES`. No canonical promotion occurred. Free D1 allows 100,000 written rows/day and resets at 00:00 UTC.
+- The quota exhaustion happened after earlier traffic plus the migration/index build. DDL can contribute read/write rows; therefore production migrations require their own control-plane reserve and must not share the lane budget blindly.
+
+## v0.2.10 frozen-scope calibration
+
+- Live source sizes after normalization: QB 76,818 bytes / 477 players; RB 170,075 / 1,049; WR 290,271 / 1,792; TE 137,381 / 849; K 31,396 / 196. Each immutable scope frame is safely below D1's 2 MB row limit.
+- A fresh serial Workerd run against the real Sleeper sources accepted 4,363 observations and atomically promoted 4,354 unique players. Candidate and scope-frame tables were empty afterward.
+- Worst-case 40-player bootstrap chunk: frame load 1 query/1 row read; state load 1 query/40 rows read; candidate batch 40 queries/80 rows read/40 rows written; checkpoint 1 query/1 row read/1 row written. Including the active-sweep lookup, this stays at 44 D1 queries, below the Free-plan 50-query invocation cap.
+- Bootstrap promotion: 6 batched statements, 17,434 rows read, 13,070 rows written, 8 ms D1 SQL time, 21 ms local wall. This is the expensive first-fill case; unchanged steady-state chunks produce no candidate writes.

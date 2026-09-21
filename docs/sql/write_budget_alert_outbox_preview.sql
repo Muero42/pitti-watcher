@@ -98,6 +98,33 @@ CREATE TABLE IF NOT EXISTS alert_outbox (
 CREATE INDEX IF NOT EXISTS idx_alert_outbox_delivery
   ON alert_outbox(status, available_at, id);
 
+CREATE TABLE IF NOT EXISTS alert_outbox_policy (
+  singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+  max_pending INTEGER NOT NULL CHECK (max_pending > 0),
+  updated_at INTEGER NOT NULL
+);
+
+-- Preview calibration default only. A production migration must choose this
+-- bound explicitly from measured traffic and reserved D1 capacity.
+INSERT INTO alert_outbox_policy(singleton_id,max_pending,updated_at)
+VALUES(1,1000,0)
+ON CONFLICT(singleton_id) DO NOTHING;
+
+CREATE TRIGGER IF NOT EXISTS trg_alert_outbox_pending_bound
+BEFORE INSERT ON alert_outbox
+WHEN NEW.status='pending'
+BEGIN
+  SELECT CASE
+    WHEN NOT EXISTS(SELECT 1 FROM alert_outbox_policy WHERE singleton_id=1)
+    THEN RAISE(ABORT, 'ALERT_OUTBOX_POLICY_MISSING')
+  END;
+  SELECT CASE
+    WHEN (SELECT COUNT(*) FROM alert_outbox WHERE status='pending') >=
+         (SELECT max_pending FROM alert_outbox_policy WHERE singleton_id=1)
+    THEN RAISE(ABORT, 'ALERT_OUTBOX_PENDING_LIMIT')
+  END;
+END;
+
 -- The outbox is populated only from evidence that the existing Sleeper lanes already
 -- produce. There is intentionally no sender, external source, or transaction executor.
 CREATE TRIGGER IF NOT EXISTS trg_accepted_run_to_alert_outbox

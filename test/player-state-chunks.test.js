@@ -43,6 +43,7 @@ function fixture(t,{count=95,changedCount=count,failCheckpointOnce=false,failPro
   const runs=[];
   const sweeps=new Map();
   const candidates=new Map();
+  const frames=new Map();
   const evidence=new Map();
   const calls={fetches:[],checkpointAttempts:0,batchSizes:[]};
   let failCheckpoint=failCheckpointOnce;
@@ -70,6 +71,10 @@ function fixture(t,{count=95,changedCount=count,failCheckpointOnce=false,failPro
           throw new Error(`Unexpected first: ${sql}`);
         },
         async all(){
+          if(sql.startsWith('SELECT run_id,source_scope,captured_at,source_etag,player_count,frame_json')){
+            const row=frames.get(`${args[0]}:${args[1]}`);
+            return{results:row?[{...row}]:[],meta:{rows_read:row?1:0,rows_written:0}};
+          }
           if(sql.startsWith('SELECT * FROM player_state WHERE player_id IN')){
             const ids=new Set(args.map(String));
             return{results:[...state.values()].filter(row=>ids.has(String(row.player_id)))};
@@ -81,6 +86,12 @@ function fixture(t,{count=95,changedCount=count,failCheckpointOnce=false,failPro
           throw new Error(`Unexpected all: ${sql}`);
         },
         async run(){
+          if(sql.startsWith('INSERT INTO player_state_scope_frames')){
+            const key=`${args[0]}:${args[1]}`;
+            if(frames.has(key))return success(0);
+            frames.set(key,{run_id:args[0],source_scope:args[1],captured_at:args[2],source_etag:args[3],player_count:args[4],frame_json:args[5]});
+            return success();
+          }
           if(sql.startsWith('INSERT INTO player_state_sweeps')){
             const sweep={run_id:args[0],source_etag:args[1],total_entries:args[2],next_index:0,scope_offset:0,scope_etag:null,revalidated_at:null,promotion_offset:0,seen_count:0,started_at:args[3]};
             sweeps.set(sweep.run_id,sweep);return success();
@@ -142,6 +153,8 @@ function fixture(t,{count=95,changedCount=count,failCheckpointOnce=false,failPro
           for(const [key,candidate] of candidates){
             if(candidate.run_id===stmt.args[0]&&(stmt.args.length<2||candidate.source_scope===stmt.args[1]))candidates.delete(key);
           }
+        }else if(stmt.sql.startsWith('DELETE FROM player_state_scope_frames')){
+          for(const [key,frame] of frames)if(frame.run_id===stmt.args[0])frames.delete(key);
         }else if(stmt.sql.startsWith('UPDATE player_state_sweeps')&&stmt.sql.includes('SET scope_offset=0')){
           const sweep=sweeps.get(stmt.args[0]);
           if(sweep&&sweep.next_index===stmt.args[1]&&sweep.scope_offset===stmt.args[2]&&sweep.revalidated_at==null){
@@ -171,23 +184,23 @@ function fixture(t,{count=95,changedCount=count,failCheckpointOnce=false,failPro
   });
 
   return{
-    env:{DB,PLAYER_STATE_CHUNK_SIZE:'40',PHASE_LOGGING:'1'},runs,sweeps,candidates,evidence,state,calls,
+    env:{DB,PLAYER_STATE_CHUNK_SIZE:'40',PHASE_LOGGING:'1'},runs,sweeps,candidates,frames,evidence,state,calls,
     setEtag(scope,value){etags[scope]=value;}
   };
 }
 
-test('chunked sweep persists a two-dimensional cursor and stays fail-closed through revalidation',async t=>{
+test('chunked sweep freezes each scope before bounded processing and stays fail-closed until promotion',async t=>{
   const f=fixture(t);
   const logs=[];
   t.mock.method(console,'log',value=>logs.push(JSON.parse(value)));
   const first=await beginChunkedPlayerStateSweep(f.env,NOW);
-  assert.deepEqual({scope:first.scope,processed:first.processed,offset:first.player_offset},{scope:'QB',processed:40,offset:40});
+  assert.deepEqual({scope:first.scope,captured:first.captured,processed:first.processed,offset:first.player_offset},{scope:'QB',captured:true,processed:0,offset:0});
   assert.equal(f.sweeps.get(1).next_index,0);
-  assert.equal(f.sweeps.get(1).scope_offset,40);
+  assert.equal(f.sweeps.get(1).scope_offset,0);
   assert.equal(runLaneStatus(f.runs[0],36*3600000,NOW),'FAIL');
 
   let result;
-  for(let i=0;i<10;i++){
+  for(let i=0;i<20;i++){
     result=await continueChunkedPlayerStateSweep(f.env);
     if(result.complete)break;
   }
@@ -195,8 +208,9 @@ test('chunked sweep persists a two-dimensional cursor and stays fail-closed thro
   assert.equal(f.runs[0].ok,1);
   assert.equal(f.runs[0].item_count,95);
   assert.ok(f.calls.batchSizes.every(size=>size<=75));
-  assert.deepEqual(f.calls.fetches.filter(x=>x.conditional).map(x=>x.scope),SCOPES);
-  for(const phase of ['source.fetch','state.load','candidate.batch','checkpoint','promotion.load','promotion.commit']){
+  assert.deepEqual(f.calls.fetches.map(x=>x.scope),SCOPES);
+  assert.ok(f.calls.fetches.every(x=>!x.conditional));
+  for(const phase of ['source.fetch','scope.frame.load','scope.frame.capture','state.load','candidate.batch','checkpoint','sweep.seal','promotion.load','promotion.commit']){
     assert.ok(logs.some(row=>row.phase===phase&&row.state==='start'),`missing ${phase} start`);
     assert.ok(logs.some(row=>row.phase===phase&&row.state==='ok'),`missing ${phase} ok`);
   }
@@ -205,10 +219,8 @@ test('chunked sweep persists a two-dimensional cursor and stays fail-closed thro
 test('an aborted chunk resumes from the last committed cursor without duplicate evidence',async t=>{
   const f=fixture(t,{count:40,failCheckpointOnce:true});
   t.mock.method(console,'log',()=>{});
-  f.runs.push({id:1,run_type:'player_state:scheduled',started_at:NOW,finished_at:null,ok:0,item_count:0,error:null});
-  const sweep={run_id:1,source_etag:'{}',total_entries:5,next_index:0,scope_offset:0,scope_etag:null,revalidated_at:null,promotion_offset:0,seen_count:0,started_at:NOW};
-  f.sweeps.set(1,sweep);
-
+  await beginChunkedPlayerStateSweep(f.env,NOW);
+  const sweep=f.sweeps.get(1);
   await assert.rejects(processPlayerStateSweepChunk(f.env,{...sweep}),/synthetic termination/);
   assert.equal(sweep.scope_offset,0);
   assert.equal(f.candidates.size,40);
@@ -221,27 +233,20 @@ test('an aborted chunk resumes from the last committed cursor without duplicate 
   assert.equal(sweep.seen_count,40);
 });
 
-test('a rotated scope rejects B locally and the same sealed C transition emits exactly once',async t=>{
+test('an upstream rotation after capture cannot reset the frozen scope generation',async t=>{
   const f=fixture(t,{count:41,changedCount:1});
   t.mock.method(console,'log',()=>{});
   await beginChunkedPlayerStateSweep(f.env,NOW);
+  assert.equal(f.sweeps.get(1).scope_offset,0);
+  await continueChunkedPlayerStateSweep(f.env);
   assert.equal(f.sweeps.get(1).scope_offset,40);
   assert.equal(f.state.get('0000').injury_status,null);
   assert.equal(f.candidates.get('1:0000').injury_status,'Questionable');
   assert.equal(f.evidence.size,0);
 
   f.setEtag('QB','"QB-rotated"');
-  const reset=await continueChunkedPlayerStateSweep(f.env);
-  assert.equal(reset.reset,true);
-  assert.equal(f.sweeps.get(1).next_index,0);
-  assert.equal(f.sweeps.get(1).scope_offset,0);
-  assert.equal(f.runs[0].ok,0);
-  assert.equal(f.state.get('0000').injury_status,null);
-  assert.equal(f.candidates.size,0);
-  assert.equal(f.evidence.size,0);
-
   let result;
-  for(let i=0;i<10;i++){
+  for(let i=0;i<20;i++){
     result=await continueChunkedPlayerStateSweep(f.env);
     if(result.complete)break;
   }
@@ -250,6 +255,7 @@ test('a rotated scope rejects B locally and the same sealed C transition emits e
   assert.equal(f.state.get('0000').injury_status,'Questionable');
   assert.equal(f.candidates.size,0);
   assert.equal(f.evidence.size,1);
+  assert.equal(f.calls.fetches.filter(row=>row.scope==='QB').length,1);
   assert.deepEqual([...f.evidence.values()].map(row=>row.observation_run_id),[1]);
   const visible=[...f.evidence.values()].filter(event=>{
     const run=f.runs.find(row=>row.id===event.observation_run_id);
@@ -258,17 +264,36 @@ test('a rotated scope rejects B locally and the same sealed C transition emits e
   assert.equal(visible.length,1);
 });
 
+test('a partial pre-frame sweep is failed and replaced by a fresh frozen run',async t=>{
+  const f=fixture(t,{count:40,changedCount:1});
+  t.mock.method(console,'log',()=>{});
+  f.runs.push({id:1,run_type:'player_state:scheduled',started_at:NOW-1,finished_at:null,ok:0,item_count:0,error:null});
+  f.sweeps.set(1,{
+    run_id:1,source_etag:'{}',total_entries:5,next_index:0,scope_offset:40,
+    scope_etag:'"legacy"',revalidated_at:null,promotion_offset:0,seen_count:40,started_at:NOW-1
+  });
+
+  const result=await continueChunkedPlayerStateSweep(f.env);
+  assert.equal(result.restarted_legacy_sweep,true);
+  assert.equal(f.runs[0].ok,0);
+  assert.equal(f.runs[0].finished_at,NOW);
+  assert.equal(f.runs[1].finished_at,null);
+  assert.equal(f.sweeps.get(2).scope_offset,0);
+  assert.equal(f.frames.has('2:QB'),true);
+  assert.equal(f.candidates.size,0);
+});
+
 test('promotion stays below the free-plan query cap and rolls back as one D1 batch',async t=>{
   const f=fixture(t,{count:40,failPromotionOnce:true});
   t.mock.method(console,'log',()=>{});
   await beginChunkedPlayerStateSweep(f.env,NOW);
-  for(let i=0;i<4;i++)await continueChunkedPlayerStateSweep(f.env);
+  for(let i=0;i<9;i++)await continueChunkedPlayerStateSweep(f.env);
   await assert.rejects(continueChunkedPlayerStateSweep(f.env),/synthetic atomic promotion failure/);
   assert.equal(f.runs[0].ok,0);
   assert.ok([...f.state.values()].every(row=>row.injury_status==null));
   assert.equal(f.evidence.size,0);
-  assert.equal(f.calls.batchSizes.at(-1),5);
-  assert.ok(1+1+5<=50,'active-sweep read, candidate count and promotion batch must fit the free D1 query cap');
+  assert.equal(f.calls.batchSizes.at(-1),6);
+  assert.ok(1+1+6<=50,'active-sweep read, candidate count and promotion batch must fit the free D1 query cap');
 });
 
 test('v0.2.9 disables legacy debug mutations before touching storage or upstreams',async t=>{
@@ -309,10 +334,10 @@ test('v0.2.9 does not inherit unknown legacy routes',async()=>{
   assert.equal((await response.json()).error,'NOT_FOUND');
 });
 
-test('v0.2.9 health identifies the chunked-frame entrypoint',async()=>{
+test('v0.2.10 health identifies the frozen-scope entrypoint',async()=>{
   const response=await v029Worker.fetch(new Request('https://local.invalid/health'),{});
   assert.equal(response.status,200);
-  assert.equal((await response.json()).version,'0.2.9');
+  assert.equal((await response.json()).version,'0.2.10');
 });
 
 test('v0.2.9 exposes only a valid default Worker entrypoint',()=>{

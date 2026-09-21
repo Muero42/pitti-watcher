@@ -7,7 +7,7 @@ import {
   timingSafeStringEqual
 } from './index.js';
 
-const VERSION='0.2.9';
+const VERSION='0.2.10';
 const MARKET_CRON='*/15 * * * *';
 const PLAYER_STATE_CONTINUATION_CRON='2,7,12,22,37,52 * * * *';
 

@@ -1152,6 +1152,74 @@ async function initializeChunkedPlayerStateSweep(env, at, source = 'scheduled', 
   });
 }
 
+function normalizedPlayerScopeFrame(players) {
+  return Object.entries(players || {})
+    .filter(([, player]) => player?.position)
+    .sort(([a],[b]) => a.localeCompare(b))
+    .map(([id, player]) => [String(id), playerStateOf(player)]);
+}
+
+function parsePlayerScopeFrame(row, scope) {
+  if (!row) return null;
+  const capturedAt = Number(row.captured_at);
+  const playerCount = Number(row.player_count);
+  if (String(row.source_scope) !== scope || !String(row.source_etag || '').trim() ||
+      !Number.isSafeInteger(capturedAt) || capturedAt < 0 ||
+      !Number.isSafeInteger(playerCount) || playerCount < 0) {
+    throw new Error('PLAYER_SCOPE_FRAME_INVALID');
+  }
+  let entries;
+  try { entries = JSON.parse(String(row.frame_json)); }
+  catch (_) { throw new Error('PLAYER_SCOPE_FRAME_INVALID'); }
+  if (!Array.isArray(entries) || entries.length !== playerCount ||
+      entries.some(entry => !Array.isArray(entry) || entry.length !== 2 || !entry[0] || !entry[1]?.position)) {
+    throw new Error('PLAYER_SCOPE_FRAME_INVALID');
+  }
+  for (let index = 1; index < entries.length; index++) {
+    if (String(entries[index - 1][0]).localeCompare(String(entries[index][0])) >= 0) {
+      throw new Error('PLAYER_SCOPE_FRAME_INVALID');
+    }
+  }
+  return {
+    sourceScope: scope,
+    sourceEtag: String(row.source_etag),
+    capturedAt,
+    entries
+  };
+}
+
+async function loadPlayerScopeFrame(env, runId, scope, context) {
+  const result = await runPhase(env, 'player_state', 'scope.frame.load', context, () => env.DB.prepare(`
+    SELECT run_id,source_scope,captured_at,source_etag,player_count,frame_json
+    FROM player_state_scope_frames
+    WHERE run_id=?1 AND source_scope=?2
+  `).bind(runId, scope).all());
+  return parsePlayerScopeFrame(result.results?.[0] || null, scope);
+}
+
+async function capturePlayerScopeFrame(env, sweep, scope, context) {
+  const snapshot = await runPhase(env, 'player_state', 'source.fetch', context,
+    () => fetchPlayerScope(env, scope));
+  const capturedAt = Date.now();
+  const entries = normalizedPlayerScopeFrame(snapshot.players);
+  const frameJson = JSON.stringify(entries);
+  const maxBytes = 1_500_000;
+  if (new TextEncoder().encode(frameJson).byteLength > maxBytes) {
+    throw new Error('PLAYER_SCOPE_FRAME_TOO_LARGE');
+  }
+  await runPhase(env, 'player_state', 'scope.frame.capture', context, () => env.DB.prepare(`
+    INSERT INTO player_state_scope_frames(
+      run_id,source_scope,captured_at,source_etag,player_count,frame_json
+    ) VALUES(?1,?2,?3,?4,?5,?6)
+    ON CONFLICT(run_id,source_scope) DO NOTHING
+  `).bind(
+    sweep.run_id, scope, capturedAt, snapshot.sourceEtag, entries.length, frameJson
+  ).run());
+  const frame = await loadPlayerScopeFrame(env, Number(sweep.run_id), scope, context);
+  if (!frame) throw new Error('PLAYER_SCOPE_FRAME_UNCONFIRMED');
+  return frame;
+}
+
 async function stagePlayerStateEntries(env, at, runId, sourceScope, entries, existingRows, context) {
   const existing = new Map((existingRows || []).map(row => [String(row.player_id), row]));
   const statements = [];
@@ -1209,28 +1277,6 @@ async function stagePlayerStateEntries(env, at, runId, sourceScope, entries, exi
   return { seen, changed, candidates: statements.length };
 }
 
-async function resetPlayerStateScope(env, sweep, scope, context) {
-  const results = await runPhase(env, 'player_state', 'scope.reset', context, () => env.DB.batch([
-    env.DB.prepare(`
-      DELETE FROM player_state_candidates WHERE run_id=?1 AND source_scope=?2
-    `).bind(sweep.run_id, scope),
-    env.DB.prepare(`
-      UPDATE player_state_sweeps
-      SET scope_offset=0,scope_etag=NULL,seen_count=seen_count-scope_offset
-      WHERE run_id=?1 AND next_index=?2 AND scope_offset=?3 AND revalidated_at IS NULL
-    `).bind(sweep.run_id, Number(sweep.next_index), Number(sweep.scope_offset || 0))
-  ]));
-  const checkpoint = results?.[1];
-  if (checkpoint?.success !== true || checkpoint.meta?.changes !== 1) {
-    throw new Error('PLAYER_SCOPE_RESET_FAILED');
-  }
-  return {
-    ok: true, complete: false, reset: true, scope,
-    scope_index: Number(sweep.next_index), player_offset: 0,
-    seen: Number(sweep.seen_count) - Number(sweep.scope_offset || 0), processed: 0
-  };
-}
-
 async function promotePlayerStateRun(env, sweep) {
   const runId = Number(sweep.run_id);
   const context = { run_id: runId };
@@ -1285,7 +1331,8 @@ async function promotePlayerStateRun(env, sweep) {
           WHERE run_id=?3 AND revalidated_at IS NOT NULL AND promotion_offset=?4
         )
     `).bind(finishedAt,Number(sweep.seen_count),runId,candidateCount),
-    env.DB.prepare(`DELETE FROM player_state_candidates WHERE run_id=?1`).bind(runId)
+    env.DB.prepare(`DELETE FROM player_state_candidates WHERE run_id=?1`).bind(runId),
+    env.DB.prepare(`DELETE FROM player_state_scope_frames WHERE run_id=?1`).bind(runId)
   ];
   const results = await runPhase(env, 'player_state', 'promotion.commit', context,
     () => env.DB.batch(statements));
@@ -1310,27 +1357,37 @@ async function processPlayerStateSweepChunk(env, sweep) {
   if (index === PLAYER_STATE_SCOPES.length) {
     if (sweep.revalidated_at != null) return promotePlayerStateRun(env, sweep);
     const revalidatedAt = Date.now();
-    const checkpoint = await env.DB.prepare(`
-      UPDATE player_state_sweeps SET revalidated_at=?1
-      WHERE run_id=?2 AND next_index=?3 AND revalidated_at IS NULL
-    `).bind(revalidatedAt, sweep.run_id, PLAYER_STATE_SCOPES.length).run();
+    const checkpoint = await runPhase(env, 'player_state', 'sweep.seal', baseContext, () => env.DB.prepare(`
+        UPDATE player_state_sweeps SET revalidated_at=?1
+        WHERE run_id=?2 AND next_index=?3 AND revalidated_at IS NULL
+      `).bind(revalidatedAt, sweep.run_id, PLAYER_STATE_SCOPES.length).run());
     if (checkpoint?.success !== true || checkpoint.meta?.changes !== 1) throw new Error('PLAYER_REVALIDATION_CHECKPOINT_FAILED');
     return promotePlayerStateRun(env, { ...sweep, revalidated_at: revalidatedAt, promotion_offset: 0 });
   }
 
   const scope = PLAYER_STATE_SCOPES[index];
-  const snapshot = await runPhase(env, 'player_state', 'source.fetch', baseContext,
-    () => fetchPlayerScope(env, scope));
-  if (offset > 0 && String(sweep.scope_etag || '') !== snapshot.sourceEtag) {
-    return resetPlayerStateScope(env, sweep, scope, { ...baseContext, scope });
+  const frameContext = { ...baseContext, scope };
+  let frame = await loadPlayerScopeFrame(env, Number(sweep.run_id), scope, frameContext);
+  if (!frame && offset > 0) {
+    // A pre-frame deployment may have advanced this cursor against a mutable
+    // upstream response. It cannot be proven coherent, so close it and start a
+    // fresh run whose scopes are frozen before any candidate comparison.
+    await safeFinishRun(env, Number(sweep.run_id), false, 0);
+    const replacement = await initializeChunkedPlayerStateSweep(env, Date.now(), 'scheduled');
+    return { ...replacement, restarted_legacy_sweep: true };
   }
-
-  const entries = Object.entries(snapshot.players || {})
-    .filter(([, player]) => player?.position)
-    .sort(([a],[b]) => a.localeCompare(b));
-  if (offset > entries.length) throw new Error('PLAYER_SWEEP_OFFSET_INVALID');
-  const chunkSize = clampInt(env.PLAYER_STATE_CHUNK_SIZE, 25, 50, 40);
-  const chunk = entries.slice(offset, offset + chunkSize);
+  if (!frame) {
+    frame = await capturePlayerScopeFrame(env, sweep, scope, frameContext);
+    return {
+      ok: true, complete: false, captured: true, scope,
+      scope_index: index, player_offset: 0,
+      seen: Number(sweep.seen_count), processed: 0,
+      player_count: frame.entries.length
+    };
+  }
+  if (offset > frame.entries.length) throw new Error('PLAYER_SWEEP_OFFSET_INVALID');
+  const chunkSize = clampInt(env.PLAYER_STATE_CHUNK_SIZE, 25, 40, 40);
+  const chunk = frame.entries.slice(offset, offset + chunkSize);
   const context = { ...baseContext, scope, chunk_size: chunk.length };
   const existingResult = await runPhase(env, 'player_state', 'state.load', context, async () => {
     if (!chunk.length) return { results: [], meta: { rows_read: 0, rows_written: 0 } };
@@ -1339,21 +1396,14 @@ async function processPlayerStateSweepChunk(env, sweep) {
     return env.DB.prepare(`SELECT * FROM player_state WHERE player_id IN (${placeholders})`).bind(...ids).all();
   });
   const persisted = await stagePlayerStateEntries(
-    env, Number(sweep.started_at), Number(sweep.run_id), scope, chunk, existingResult.results || [], context
+    env, frame.capturedAt, Number(sweep.run_id), scope, chunk, existingResult.results || [], context
   );
 
-  const scopeComplete = offset + chunk.length >= entries.length;
-  if (scopeComplete) {
-    const sealed = await runPhase(env, 'player_state', 'source.revalidate', context,
-      () => fetchPlayerScope(env, scope, snapshot.sourceEtag, false));
-    if (!sealed.unchanged || sealed.sourceEtag !== snapshot.sourceEtag) {
-      return resetPlayerStateScope(env, sweep, scope, context);
-    }
-  }
+  const scopeComplete = offset + chunk.length >= frame.entries.length;
   const nextIndex = scopeComplete ? index + 1 : index;
   const nextOffset = scopeComplete ? 0 : offset + chunk.length;
-  if (scopeComplete) etags[scope] = snapshot.sourceEtag;
-  const nextScopeEtag = scopeComplete ? null : snapshot.sourceEtag;
+  if (scopeComplete) etags[scope] = frame.sourceEtag;
+  const nextScopeEtag = scopeComplete ? null : frame.sourceEtag;
   await runPhase(env, 'player_state', 'checkpoint', context, async () => {
     const checkpoint = await env.DB.prepare(`
       UPDATE player_state_sweeps
