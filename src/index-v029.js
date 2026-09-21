@@ -1,4 +1,4 @@
-import v027Worker,{companionFeed} from './index-v027.js';
+import v027Worker,{acceptedEvidenceSql,companionFeed} from './index-v027.js';
 import {
   beginChunkedPlayerStateSweep,
   continueChunkedPlayerStateSweep,
@@ -16,12 +16,39 @@ function jsonCors(data,status=200){
   }});
 }
 
+function requireWatcherToken(request,env){
+  const expected=String(env.WATCHER_TOKEN||'').trim();
+  if(!expected)return jsonCors({ok:false,error:'WATCHER_TOKEN is not configured'},503);
+  const header=String(request.headers.get('authorization')||'');
+  const supplied=header.startsWith('Bearer ')?header.slice(7):'';
+  if(!supplied||supplied!==expected)return jsonCors({ok:false,error:'unauthorized'},401);
+  return null;
+}
+
 export default {
   async fetch(request,env,ctx){
     const url=new URL(request.url);
     if(url.pathname==='/health')return jsonCors({ok:true,service:'pitti-watcher',version:VERSION,at:Date.now()});
     if(url.pathname==='/companion-feed')return companionFeed(request,env,ctx,VERSION,latestMarketFrameRows);
-    return v027Worker.fetch(request,env,ctx);
+    if(url.pathname==='/market'||url.pathname==='/events'||url.pathname.startsWith('/debug/')){
+      const auth=requireWatcherToken(request,env);
+      if(auth)return auth;
+    }
+    if(url.pathname==='/market'){
+      const limit=Math.max(1,Math.min(100,Math.trunc(Number(url.searchParams.get('limit'))||50)));
+      return jsonCors(await latestMarketFrameRows(env,limit));
+    }
+    if(url.pathname==='/events'){
+      const limit=Math.max(1,Math.min(100,Math.trunc(Number(url.searchParams.get('limit'))||30)));
+      const rows=await env.DB.prepare(acceptedEvidenceSql(limit)).all();
+      return jsonCors(rows.results||[]);
+    }
+    if(url.pathname==='/debug/run-trending'||url.pathname==='/debug/run-players'){
+      return jsonCors({ok:false,error:'LEGACY_DEBUG_MUTATION_DISABLED'},410);
+    }
+    if(url.pathname==='/')return jsonCors({ok:true,endpoints:['/health','/companion-feed','/league-state','/events','/runs','/run-health','/market']});
+    if(['/league-state','/runs','/run-health'].includes(url.pathname))return v027Worker.fetch(request,env,ctx);
+    return jsonCors({ok:false,error:'NOT_FOUND'},404);
   },
   async scheduled(controller,env,ctx){
     const cron=controller.cron||'';

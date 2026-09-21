@@ -1105,7 +1105,8 @@ async function evidenceFingerprint(e) {
 
 async function activeChunkedPlayerStateSweep(env) {
   return env.DB.prepare(`
-    SELECT s.run_id,s.source_etag,s.total_entries,s.next_index,s.scope_offset,s.scope_etag,s.seen_count,s.started_at
+    SELECT s.run_id,s.source_etag,s.total_entries,s.next_index,s.scope_offset,s.scope_etag,
+           s.revalidated_at,s.promotion_offset,s.seen_count,s.started_at
     FROM player_state_sweeps s
     JOIN watcher_runs r ON r.id=s.run_id
     WHERE r.finished_at IS NULL
@@ -1119,8 +1120,9 @@ async function initializeChunkedPlayerStateSweep(env, at, source = 'scheduled', 
   try {
     const result = await env.DB.prepare(`
       INSERT INTO player_state_sweeps(
-        run_id,source_etag,total_entries,next_index,scope_offset,scope_etag,seen_count,started_at
-      ) VALUES(?1,?2,?3,0,0,NULL,0,?4)
+        run_id,source_etag,total_entries,next_index,scope_offset,scope_etag,
+        revalidated_at,promotion_offset,seen_count,started_at
+      ) VALUES(?1,?2,?3,0,0,NULL,NULL,0,0,?4)
     `).bind(runId, '{}', PLAYER_STATE_SCOPES.length, at).run();
     if (result?.success !== true || result.meta?.changes !== 1) throw new Error('PLAYER_SWEEP_INIT_FAILED');
   } catch (error) {
@@ -1128,8 +1130,111 @@ async function initializeChunkedPlayerStateSweep(env, at, source = 'scheduled', 
   }
   return processPlayerStateSweepChunk(env, {
     run_id: runId, source_etag: '{}', total_entries: PLAYER_STATE_SCOPES.length,
-    next_index: 0, scope_offset: 0, scope_etag: null, seen_count: 0, started_at: at
+    next_index: 0, scope_offset: 0, scope_etag: null, revalidated_at: null,
+    promotion_offset: 0, seen_count: 0, started_at: at
   });
+}
+
+async function stagePlayerStateEntries(env, at, runId, entries, existingRows, context) {
+  const existing = new Map((existingRows || []).map(row => [String(row.player_id), row]));
+  const statements = [];
+  let seen = 0, changed = 0;
+  for (const [id, player] of entries) {
+    if (!player?.position) continue;
+    seen++;
+    const state = playerStateOf(player);
+    const hash = stateHash(state);
+    const old = existing.get(String(id));
+    if (old?.state_hash === hash) continue;
+    if (old) changed++;
+    statements.push(env.DB.prepare(`
+      INSERT INTO player_state_candidates(
+        run_id,player_id,full_name,team,position,injury_status,
+        practice_participation,depth_chart_order,status,state_hash,observed_at
+      ) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)
+      ON CONFLICT(run_id,player_id) DO UPDATE SET
+        full_name=excluded.full_name,team=excluded.team,position=excluded.position,
+        injury_status=excluded.injury_status,practice_participation=excluded.practice_participation,
+        depth_chart_order=excluded.depth_chart_order,status=excluded.status,
+        state_hash=excluded.state_hash,observed_at=excluded.observed_at
+    `).bind(
+      runId,id,state.full_name,state.team,state.position,state.injury_status,
+      state.practice_participation,state.depth_chart_order,state.status,hash,at
+    ));
+  }
+  await runStatementBatches(env, 'player_state', 'candidate.batch', context, statements, PLAYER_STATE_BATCH_SIZE);
+  return { seen, changed, candidates: statements.length };
+}
+
+async function promotePlayerStateChunk(env, sweep) {
+  const offset = Number(sweep.promotion_offset || 0);
+  const chunkSize = clampInt(env.PLAYER_STATE_CHUNK_SIZE, 25, 50, 40);
+  const context = { run_id: Number(sweep.run_id), promotion_offset: offset, chunk_size: chunkSize };
+  const candidateResult = await runPhase(env, 'player_state', 'promotion.load', context, () => env.DB.prepare(`
+    SELECT * FROM player_state_candidates
+    WHERE run_id=?1 ORDER BY player_id LIMIT ?2 OFFSET ?3
+  `).bind(sweep.run_id, chunkSize + 1, offset).all());
+  const all = candidateResult.results || [];
+  const candidates = all.slice(0, chunkSize);
+  const hasMore = all.length > chunkSize;
+  if (!candidates.length) {
+    await safeFinishRun(env, Number(sweep.run_id), true, Number(sweep.seen_count));
+    return { ok: true, complete: true, seen: Number(sweep.seen_count), promoted: 0 };
+  }
+  const existing = await runPhase(env, 'player_state', 'promotion.state_load', context,
+    () => loadExistingPlayerRows(env, candidates.map(row => String(row.player_id))));
+  const byId = new Map(existing.map(row => [String(row.player_id), row]));
+  const evidence = [], stateWrites = [];
+  let evidenceStatement;
+  for (const candidate of candidates) {
+    const old = byId.get(String(candidate.player_id));
+    if (old && old.state_hash !== candidate.state_hash) {
+      const diffs = {};
+      for (const key of ['team','position','injury_status','practice_participation','depth_chart_order','status']) {
+        const before = old[key] ?? null, after = candidate[key] ?? null;
+        if (String(before) !== String(after)) diffs[key] = { before, after };
+      }
+      evidenceStatement ??= env.DB.prepare(EVIDENCE_UPSERT_SQL);
+      evidence.push(await bindEvidence(evidenceStatement, {
+        player_id:candidate.player_id,event_type:'PLAYER_STATE_CHANGED',fundamental_or_market:'fundamental',
+        occurred_at:candidate.observed_at,first_seen_at:candidate.observed_at,last_seen_at:candidate.observed_at,
+        source:'Sleeper Player Data',original_source:'Sleeper Player Data',authority:0.75,confidence:0.8,
+        thesis_link:inferThesisLink(diffs),observation_run_id:Number(sweep.run_id),
+        payload:{player:candidate.full_name,team:candidate.team,position:candidate.position,diffs}
+      }));
+    }
+    stateWrites.push(env.DB.prepare(`
+      INSERT INTO player_state(
+        player_id,full_name,team,position,injury_status,practice_participation,
+        depth_chart_order,status,first_seen_at,last_seen_at,state_hash
+      ) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)
+      ON CONFLICT(player_id) DO UPDATE SET
+        full_name=excluded.full_name,team=excluded.team,position=excluded.position,
+        injury_status=excluded.injury_status,practice_participation=excluded.practice_participation,
+        depth_chart_order=excluded.depth_chart_order,status=excluded.status,
+        last_seen_at=excluded.last_seen_at,state_hash=excluded.state_hash
+    `).bind(
+      candidate.player_id,candidate.full_name,candidate.team,candidate.position,candidate.injury_status,
+      candidate.practice_participation,candidate.depth_chart_order,candidate.status,
+      candidate.observed_at,candidate.observed_at,candidate.state_hash
+    ));
+  }
+  await runStatementBatches(env, 'player_state', 'promotion.evidence_batch', context, evidence, PLAYER_STATE_BATCH_SIZE);
+  await runStatementBatches(env, 'player_state', 'promotion.state_batch', context, stateWrites, PLAYER_STATE_BATCH_SIZE);
+  const nextOffset = offset + candidates.length;
+  await runPhase(env, 'player_state', 'promotion.checkpoint', context, async () => {
+    const result = await env.DB.prepare(`
+      UPDATE player_state_sweeps SET promotion_offset=?1
+      WHERE run_id=?2 AND promotion_offset=?3 AND revalidated_at IS NOT NULL
+    `).bind(nextOffset, sweep.run_id, offset).run();
+    if (result?.success !== true || result.meta?.changes !== 1) throw new Error('PLAYER_PROMOTION_CHECKPOINT_FAILED');
+    return result;
+  });
+  if (!hasMore) {
+    await safeFinishRun(env, Number(sweep.run_id), true, Number(sweep.seen_count));
+    return { ok: true, complete: true, seen: Number(sweep.seen_count), promoted: nextOffset };
+  }
+  return { ok: true, complete: false, promoting: true, promoted: nextOffset, seen: Number(sweep.seen_count) };
 }
 
 async function processPlayerStateSweepChunk(env, sweep) {
@@ -1143,14 +1248,20 @@ async function processPlayerStateSweepChunk(env, sweep) {
   const baseContext = { run_id: Number(sweep.run_id), scope_index: index, player_offset: offset };
 
   if (index === PLAYER_STATE_SCOPES.length) {
+    if (sweep.revalidated_at != null) return promotePlayerStateChunk(env, sweep);
     const coherent = await runPhase(env, 'player_state', 'source.revalidate', baseContext,
       () => revalidatePlayerStateScopes(env, etags));
     if (!coherent) {
       await safeFinishRun(env, Number(sweep.run_id), false, 0);
       return initializeChunkedPlayerStateSweep(env, Date.now(), 'scheduled');
     }
-    await safeFinishRun(env, Number(sweep.run_id), true, Number(sweep.seen_count));
-    return { ok: true, complete: true, seen: Number(sweep.seen_count), processed: 0 };
+    const revalidatedAt = Date.now();
+    const checkpoint = await env.DB.prepare(`
+      UPDATE player_state_sweeps SET revalidated_at=?1
+      WHERE run_id=?2 AND next_index=?3 AND revalidated_at IS NULL
+    `).bind(revalidatedAt, sweep.run_id, PLAYER_STATE_SCOPES.length).run();
+    if (checkpoint?.success !== true || checkpoint.meta?.changes !== 1) throw new Error('PLAYER_REVALIDATION_CHECKPOINT_FAILED');
+    return promotePlayerStateChunk(env, { ...sweep, revalidated_at: revalidatedAt, promotion_offset: 0 });
   }
 
   const scope = PLAYER_STATE_SCOPES[index];
@@ -1174,8 +1285,8 @@ async function processPlayerStateSweepChunk(env, sweep) {
     const placeholders = ids.map((_, position) => `?${position + 1}`).join(',');
     return env.DB.prepare(`SELECT * FROM player_state WHERE player_id IN (${placeholders})`).bind(...ids).all();
   });
-  const persisted = await persistPlayerStateEntries(
-    env, Number(sweep.started_at), chunk, existingResult.results || [], context
+  const persisted = await stagePlayerStateEntries(
+    env, Number(sweep.started_at), Number(sweep.run_id), chunk, existingResult.results || [], context
   );
 
   const scopeComplete = offset + chunk.length >= entries.length;

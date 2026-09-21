@@ -11,12 +11,10 @@ export function runLaneStatus(run,maxAgeMs,now=Date.now()){
   return 'PASS';
 }
 
-export function acceptedLaneStatus(latestAttempt,latestAccepted,maxAgeMs,now=Date.now()){
-  if(latestAttempt&&latestAttempt.finished_at!=null&&Number(latestAttempt.ok)!==1){
-    const failedAt=Number(latestAttempt.started_at);
-    const acceptedAt=Number(latestAccepted?.started_at);
-    if(!latestAccepted||!Number.isFinite(acceptedAt)||failedAt>=acceptedAt)return 'FAIL';
-  }
+export function acceptedLaneStatus(latestAttempt,latestAccepted,latestCompletedFailure,maxAgeMs,now=Date.now()){
+  const acceptedId=Number(latestAccepted?.id||0);
+  const failedId=Number(latestCompletedFailure?.id||0);
+  if(failedId>acceptedId)return 'FAIL';
   if(latestAttempt&&latestAttempt.finished_at==null&&!latestAccepted)return 'FAIL';
   return runLaneStatus(latestAccepted,maxAgeMs,now);
 }
@@ -79,7 +77,7 @@ export function buildFreeAgencyRadar(events=[],market=[],league=null){
 
 function publicRun(x){
   if(!x)return null;
-  return{started_at:x.started_at,finished_at:x.finished_at,ok:Number(x.ok)===1,item_count:Number(x.item_count||0)};
+  return{id:x.id,started_at:x.started_at,finished_at:x.finished_at,ok:Number(x.ok)===1,item_count:Number(x.item_count||0)};
 }
 
 function jsonCors(data,status=200){
@@ -88,27 +86,30 @@ function jsonCors(data,status=200){
   }});
 }
 
-export function acceptedEvidenceSql(){
+export function acceptedEvidenceSql(limit=250){
+  const bounded=Math.max(1,Math.min(250,Math.trunc(Number(limit)||250)));
   return `
     SELECT e.id,e.player_id,e.event_type,e.fundamental_or_market,e.occurred_at,e.first_seen_at,e.last_seen_at,
            e.source,e.original_source,e.authority,e.confidence,e.thesis_link,e.payload_json,e.observation_run_id
     FROM evidence_events e
     LEFT JOIN watcher_runs r ON r.id=e.observation_run_id
     WHERE e.observation_run_id IS NULL OR (r.ok=1 AND r.finished_at IS NOT NULL)
-    ORDER BY e.first_seen_at DESC LIMIT 250
+    ORDER BY e.first_seen_at DESC LIMIT ${bounded}
   `;
 }
 
 export async function companionFeed(request,env,ctx,version=VERSION,marketLoader=null){
-  const [marketAttempt,marketAccepted,playerAttempt,playerAccepted]=await Promise.all([
-    env.DB.prepare(`SELECT run_type,started_at,finished_at,ok,item_count FROM watcher_runs WHERE run_type='trending:scheduled' ORDER BY id DESC LIMIT 1`).first(),
-    env.DB.prepare(`SELECT run_type,started_at,finished_at,ok,item_count FROM watcher_runs WHERE run_type='trending:scheduled' AND ok=1 AND finished_at IS NOT NULL ORDER BY id DESC LIMIT 1`).first(),
-    env.DB.prepare(`SELECT run_type,started_at,finished_at,ok,item_count FROM watcher_runs WHERE run_type='player_state:scheduled' ORDER BY id DESC LIMIT 1`).first(),
-    env.DB.prepare(`SELECT run_type,started_at,finished_at,ok,item_count FROM watcher_runs WHERE run_type='player_state:scheduled' AND ok=1 AND finished_at IS NOT NULL ORDER BY id DESC LIMIT 1`).first()
+  const [marketAttempt,marketAccepted,marketFailure,playerAttempt,playerAccepted,playerFailure]=await Promise.all([
+    env.DB.prepare(`SELECT id,run_type,started_at,finished_at,ok,item_count FROM watcher_runs WHERE run_type='trending:scheduled' ORDER BY id DESC LIMIT 1`).first(),
+    env.DB.prepare(`SELECT id,run_type,started_at,finished_at,ok,item_count FROM watcher_runs WHERE run_type='trending:scheduled' AND ok=1 AND finished_at IS NOT NULL ORDER BY id DESC LIMIT 1`).first(),
+    env.DB.prepare(`SELECT id,run_type,started_at,finished_at,ok,item_count FROM watcher_runs WHERE run_type='trending:scheduled' AND ok=0 AND finished_at IS NOT NULL ORDER BY id DESC LIMIT 1`).first(),
+    env.DB.prepare(`SELECT id,run_type,started_at,finished_at,ok,item_count FROM watcher_runs WHERE run_type='player_state:scheduled' ORDER BY id DESC LIMIT 1`).first(),
+    env.DB.prepare(`SELECT id,run_type,started_at,finished_at,ok,item_count FROM watcher_runs WHERE run_type='player_state:scheduled' AND ok=1 AND finished_at IS NOT NULL ORDER BY id DESC LIMIT 1`).first(),
+    env.DB.prepare(`SELECT id,run_type,started_at,finished_at,ok,item_count FROM watcher_runs WHERE run_type='player_state:scheduled' AND ok=0 AND finished_at IS NOT NULL ORDER BY id DESC LIMIT 1`).first()
   ]);
   const now=Date.now();
-  const marketStatus=acceptedLaneStatus(marketAttempt,marketAccepted,45*60_000,now);
-  const playerStateStatus=acceptedLaneStatus(playerAttempt,playerAccepted,36*HOUR,now);
+  const marketStatus=acceptedLaneStatus(marketAttempt,marketAccepted,marketFailure,45*60_000,now);
+  const playerStateStatus=acceptedLaneStatus(playerAttempt,playerAccepted,playerFailure,36*HOUR,now);
   const overall=overallLaneGate(marketStatus,playerStateStatus);
   let events=[],market=[],league=null;
 
@@ -145,8 +146,10 @@ export async function companionFeed(request,env,ctx,version=VERSION,marketLoader
       player_state:publicRun(playerAccepted),
       market_latest_attempt:publicRun(marketAttempt),
       market_latest_accepted:publicRun(marketAccepted),
+      market_latest_completed_failure:publicRun(marketFailure),
       player_state_latest_attempt:publicRun(playerAttempt),
-      player_state_latest_accepted:publicRun(playerAccepted)
+      player_state_latest_accepted:publicRun(playerAccepted),
+      player_state_latest_completed_failure:publicRun(playerFailure)
     },
     league,freeAgency,events,market
   });

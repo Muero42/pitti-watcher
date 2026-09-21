@@ -49,9 +49,11 @@ test('all unhealthy lanes remain fail-closed',()=>{
 });
 
 test('an open sweep keeps the last accepted observation available while an explicit failure closes it',()=>{
-  const accepted=okRun(2*3600_000);
-  const open={ok:0,started_at:NOW-1000,finished_at:null,item_count:0};
-  assert.equal(acceptedLaneStatus(open,accepted,36*3600_000,NOW),'PASS');
-  assert.equal(acceptedLaneStatus(failedRun,accepted,36*3600_000,NOW),'FAIL');
-  assert.equal(acceptedLaneStatus(open,null,36*3600_000,NOW),'FAIL');
+  const accepted={id:1,...okRun(2*3600_000)};
+  const failure={id:2,...failedRun};
+  const open={id:3,ok:0,started_at:NOW-1000,finished_at:null,item_count:0};
+  assert.equal(acceptedLaneStatus(open,accepted,null,36*3600_000,NOW),'PASS');
+  assert.equal(acceptedLaneStatus(failure,accepted,failure,36*3600_000,NOW),'FAIL');
+  assert.equal(acceptedLaneStatus(open,null,null,36*3600_000,NOW),'FAIL');
+  assert.equal(acceptedLaneStatus(open,accepted,failure,36*3600_000,NOW),'FAIL');
 });

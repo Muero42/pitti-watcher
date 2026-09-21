@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {evidenceFingerprint,latestMarketFrameRows,marketTransitionPlan,processTrendingFrameRun,runTrendingFrames} from '../src/index.js';
+import v029Worker from '../src/index-v029.js';
 
 const success=(changes=1)=>({success:true,meta:{changes}});
 
@@ -157,4 +158,21 @@ test('a completed frame/evidence work phase stays invisible until its run is fin
   const visible=await latestMarketFrameRows(f.env,1);
   assert.equal(visible[0].captured_at,1000);
   assert.ok([...f.evidence.values()].some(row=>row.observation_run_id===2));
+});
+
+test('v0.2.9 market route reads only the latest accepted compact frame',async t=>{
+  const f=fixture(t);
+  f.env.WATCHER_TOKEN='secret';
+  await runTrendingFrames(f.env,1000,'scheduled');
+  f.setStage(1);
+  f.runs.push({id:2,run_type:'trending:scheduled',started_at:2000,finished_at:null,ok:0,item_count:0,error:null});
+  await processTrendingFrameRun(f.env,2000,2);
+
+  const response=await v029Worker.fetch(new Request('https://local.invalid/market?limit=1',{
+    headers:{authorization:'Bearer secret'}
+  }),f.env,{});
+  assert.equal(response.status,200);
+  const rows=await response.json();
+  assert.equal(rows.length,1);
+  assert.equal(rows[0].captured_at,1000);
 });

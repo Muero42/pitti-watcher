@@ -117,7 +117,7 @@ Draft-only return probability, ADP-return logic and opponent pick prediction are
 
 - Player state uses a persisted two-dimensional cursor (`next_index`, `scope_offset`) and processes 25–50 eligible players per invocation (configured default: 40).
 - A scope ETag is pinned across its chunks. Rotation fails the partial run and restarts from a fresh snapshot; a run becomes `PASS` only after all five scope ETags revalidate.
-- Structured phase markers cover source fetch/revalidation, state load, evidence batch, state batch, and checkpoint without logging payloads or bind values.
+- Structured phase markers cover source fetch/revalidation, canonical-state load, candidate staging, accepted promotion, evidence, and both observation/promotion checkpoints without logging payloads or bind values.
 - Market polling writes one compact JSON frame per run, retains only current plus previous frame, and writes evidence only for `STARTED`, `LEVEL_UP`, and `ENDED` transitions.
 - At 96 market polls/day, the steady snapshot/retention baseline drops from tens of thousands of row/index mutations to roughly 190 frame mutations/day plus run control and actual signal transitions. The `<10k/day` target is a design projection pending shadow measurement.
 - `tools/inspect-live-schedules.mjs` was a temporary read-only audit helper, not a product or deployment artifact, and is intentionally absent.
@@ -127,6 +127,8 @@ Draft-only return probability, ADP-return logic and opponent pick prediction are
 - Every compact market frame carries its `run_id`; readers and subsequent delta calculations consume only frames whose run is successfully finalized.
 - Market signal episodes are embedded in the frame, so an incomplete invocation cannot mutate a separate global signal generation.
 - New market and chunked player-state evidence carries `observation_run_id`. Feed reads admit only successfully finalized observations; nullable legacy evidence remains explicitly readable.
-- Player-state health exposes `latest_attempt` separately from `latest_accepted`. An open multi-hour sweep keeps a fresh accepted snapshot available, while a newer explicitly failed attempt still closes the lane.
+- Player-state observations stage changed rows by run and do not mutate canonical hashes before all five source ETags revalidate. Only a coherent run promotes its candidates and emits transition evidence; rejected candidates remain invisible.
+- Player-state health exposes `latest_attempt`, `latest_accepted`, and `latest_completed_failure`. An open retry cannot mask a newer explicit failure; only a still newer accepted run clears it.
+- v0.2.9 owns `/market` and `/events`: market reads only accepted compact frames and events read only accepted/legacy evidence. The legacy `/debug/run-trending` and `/debug/run-players` mutation paths return `410`; unknown inherited routes return `404`.
 - The preview outbox trigger runs only when an observation run transitions to successful finalization. Open and failed evidence never becomes pending delivery.
 - v0.2.9 matches the market cron explicitly; unknown future schedules are logged and ignored.

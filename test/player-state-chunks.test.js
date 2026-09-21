@@ -17,7 +17,7 @@ const success=(changes=1)=>({success:true,meta:{changes}});
 function fixture(t,{count=95,failCheckpointOnce=false}={}){
   t.mock.method(Date,'now',()=>NOW);
   const oldPlayer={full_name:'Player',position:'QB',team:'AAA'};
-  const newPlayer={...oldPlayer,team:'BBB'};
+  const newPlayer={...oldPlayer,injury_status:'Questionable'};
   const state=new Map();
   const qb={};
   for(let i=0;i<count;i++){
@@ -30,6 +30,7 @@ function fixture(t,{count=95,failCheckpointOnce=false}={}){
   const etags=Object.fromEntries(SCOPES.map(scope=>[scope,`"${scope}-etag"`]));
   const runs=[];
   const sweeps=new Map();
+  const candidates=new Map();
   const evidence=new Map();
   const calls={fetches:[],checkpointAttempts:0,batchSizes:[]};
   let failCheckpoint=failCheckpointOnce;
@@ -56,14 +57,28 @@ function fixture(t,{count=95,failCheckpointOnce=false}={}){
             const ids=new Set(args.map(String));
             return{results:[...state.values()].filter(row=>ids.has(String(row.player_id)))};
           }
+          if(sql.startsWith('SELECT * FROM player_state_candidates')){
+            const rows=[...candidates.values()].filter(row=>row.run_id===args[0]).sort((a,b)=>a.player_id.localeCompare(b.player_id));
+            return{results:rows.slice(args[2],args[2]+args[1])};
+          }
           throw new Error(`Unexpected all: ${sql}`);
         },
         async run(){
           if(sql.startsWith('INSERT INTO player_state_sweeps')){
-            const sweep={run_id:args[0],source_etag:args[1],total_entries:args[2],next_index:0,scope_offset:0,scope_etag:null,seen_count:0,started_at:args[3]};
+            const sweep={run_id:args[0],source_etag:args[1],total_entries:args[2],next_index:0,scope_offset:0,scope_etag:null,revalidated_at:null,promotion_offset:0,seen_count:0,started_at:args[3]};
             sweeps.set(sweep.run_id,sweep);return success();
           }
           if(sql.startsWith('UPDATE player_state_sweeps')){
+            if(sql.includes('SET revalidated_at')){
+              const sweep=sweeps.get(args[1]);
+              if(!sweep||sweep.next_index!==args[2]||sweep.revalidated_at!=null)return success(0);
+              sweep.revalidated_at=args[0];return success();
+            }
+            if(sql.includes('SET promotion_offset')){
+              const sweep=sweeps.get(args[1]);
+              if(!sweep||sweep.promotion_offset!==args[2]||sweep.revalidated_at==null)return success(0);
+              sweep.promotion_offset=args[0];return success();
+            }
             calls.checkpointAttempts++;
             if(failCheckpoint){failCheckpoint=false;throw new Error('synthetic termination before checkpoint commit');}
             const sweep=sweeps.get(args[5]);
@@ -84,11 +99,18 @@ function fixture(t,{count=95,failCheckpointOnce=false}={}){
     async batch(statements){
       calls.batchSizes.push(statements.length);
       for(const stmt of statements){
-        if(stmt.sql.startsWith('INSERT INTO evidence_events')){
+        if(stmt.sql.startsWith('INSERT INTO player_state_candidates')){
+          const [run_id,player_id,full_name,team,position,injury_status,practice_participation,depth_chart_order,status,nextHash,observed_at]=stmt.args;
+          candidates.set(`${run_id}:${player_id}`,{run_id,player_id:String(player_id),full_name,team,position,injury_status,practice_participation,depth_chart_order,status,state_hash:nextHash,observed_at});
+        }else if(stmt.sql.startsWith('INSERT INTO evidence_events')){
           evidence.set(stmt.args[0],{fingerprint:stmt.args[0],observation_run_id:stmt.args[13]});
         }else if(stmt.sql.startsWith('UPDATE player_state')){
           const [full_name,team,position,injury_status,practice_participation,depth_chart_order,status,last_seen_at,nextHash,id]=stmt.args;
           Object.assign(state.get(String(id)),{full_name,team,position,injury_status,practice_participation,depth_chart_order,status,last_seen_at,state_hash:nextHash});
+        }else if(stmt.sql.startsWith('INSERT INTO player_state(')){
+          const [player_id,full_name,team,position,injury_status,practice_participation,depth_chart_order,status,first_seen_at,last_seen_at,nextHash]=stmt.args;
+          const prior=state.get(String(player_id))||{};
+          state.set(String(player_id),{...prior,player_id:String(player_id),full_name,team,position,injury_status,practice_participation,depth_chart_order,status,first_seen_at:prior.first_seen_at??first_seen_at,last_seen_at,state_hash:nextHash});
         }else throw new Error(`Unexpected batch: ${stmt.sql}`);
       }
       return statements.map(()=>success());
@@ -104,7 +126,7 @@ function fixture(t,{count=95,failCheckpointOnce=false}={}){
   });
 
   return{
-    env:{DB,PLAYER_STATE_CHUNK_SIZE:'40',PHASE_LOGGING:'1'},runs,sweeps,evidence,state,calls,
+    env:{DB,PLAYER_STATE_CHUNK_SIZE:'40',PHASE_LOGGING:'1'},runs,sweeps,candidates,evidence,state,calls,
     setEtag(scope,value){etags[scope]=value;}
   };
 }
@@ -130,7 +152,7 @@ test('chunked sweep persists a two-dimensional cursor and stays fail-closed thro
   assert.ok(f.calls.batchSizes.every(size=>size<=75));
   assert.deepEqual(f.calls.fetches.slice(-5).map(x=>x.scope),SCOPES);
   assert.ok(f.calls.fetches.slice(-5).every(x=>x.conditional));
-  for(const phase of ['source.fetch','state.load','evidence.batch','state.batch','checkpoint']){
+  for(const phase of ['source.fetch','state.load','candidate.batch','checkpoint','promotion.load','promotion.evidence_batch','promotion.state_batch']){
     assert.ok(logs.some(row=>row.phase===phase&&row.state==='start'),`missing ${phase} start`);
     assert.ok(logs.some(row=>row.phase===phase&&row.state==='ok'),`missing ${phase} ok`);
   }
@@ -140,34 +162,90 @@ test('an aborted chunk resumes from the last committed cursor without duplicate 
   const f=fixture(t,{count:40,failCheckpointOnce:true});
   t.mock.method(console,'log',()=>{});
   f.runs.push({id:1,run_type:'player_state:scheduled',started_at:NOW,finished_at:null,ok:0,item_count:0,error:null});
-  const sweep={run_id:1,source_etag:'{}',total_entries:5,next_index:0,scope_offset:0,scope_etag:null,seen_count:0,started_at:NOW};
+  const sweep={run_id:1,source_etag:'{}',total_entries:5,next_index:0,scope_offset:0,scope_etag:null,revalidated_at:null,promotion_offset:0,seen_count:0,started_at:NOW};
   f.sweeps.set(1,sweep);
 
   await assert.rejects(processPlayerStateSweepChunk(f.env,{...sweep}),/synthetic termination/);
   assert.equal(sweep.scope_offset,0);
-  assert.equal(f.evidence.size,40);
+  assert.equal(f.candidates.size,40);
+  assert.equal(f.evidence.size,0);
   const resumed=await processPlayerStateSweepChunk(f.env,{...sweep});
   assert.equal(resumed.scope_index,1);
   assert.equal(resumed.player_offset,0);
-  assert.equal(f.evidence.size,40);
+  assert.equal(f.candidates.size,40);
+  assert.equal(f.evidence.size,0);
   assert.equal(sweep.seen_count,40);
 });
 
-test('evidence from a sweep rejected at final ETag revalidation remains permanently run-scoped',async t=>{
-  const f=fixture(t,{count:40});
+test('a rejected B observation leaves A canonical and the same accepted C transition emits exactly once',async t=>{
+  const f=fixture(t,{count:1});
   t.mock.method(console,'log',()=>{});
   await beginChunkedPlayerStateSweep(f.env,NOW);
   for(let i=0;i<4;i++)await continueChunkedPlayerStateSweep(f.env);
   assert.equal(f.sweeps.get(1).next_index,5);
-  assert.ok([...f.evidence.values()].every(row=>row.observation_run_id===1));
+  assert.equal(f.state.get('0000').injury_status,null);
+  assert.equal(f.candidates.get('1:0000').injury_status,'Questionable');
+  assert.equal(f.evidence.size,0);
+
   f.setEtag('WR','"WR-rotated"');
   await continueChunkedPlayerStateSweep(f.env);
   assert.equal(f.runs[0].ok,0);
+  assert.equal(f.state.get('0000').injury_status,null);
+  assert.equal(f.evidence.size,0);
+
+  let result;
+  for(let i=0;i<8;i++){
+    result=await continueChunkedPlayerStateSweep(f.env);
+    if(result.complete)break;
+  }
+  assert.equal(result.complete,true);
+  assert.equal(f.runs[1].ok,1);
+  assert.equal(f.state.get('0000').injury_status,'Questionable');
+  assert.equal(f.evidence.size,1);
+  assert.deepEqual([...f.evidence.values()].map(row=>row.observation_run_id),[2]);
   const visible=[...f.evidence.values()].filter(event=>{
     const run=f.runs.find(row=>row.id===event.observation_run_id);
     return run?.ok===1&&run.finished_at!=null;
   });
-  assert.deepEqual(visible,[]);
+  assert.equal(visible.length,1);
+});
+
+test('v0.2.9 disables legacy debug mutations before touching storage or upstreams',async t=>{
+  let touched=false;
+  t.mock.method(globalThis,'fetch',async()=>{touched=true;throw new Error('unexpected upstream call');});
+  const env={
+    WATCHER_TOKEN:'secret',
+    DB:{prepare(){touched=true;throw new Error('unexpected database call');}}
+  };
+  for(const path of ['/debug/run-trending','/debug/run-players']){
+    const response=await v029Worker.fetch(new Request(`https://local.invalid${path}`,{
+      headers:{authorization:'Bearer secret'}
+    }),env,{});
+    assert.equal(response.status,410);
+    assert.equal((await response.json()).error,'LEGACY_DEBUG_MUTATION_DISABLED');
+  }
+  assert.equal(touched,false);
+});
+
+test('v0.2.9 events returns only the accepted-evidence query result',async()=>{
+  const accepted={id:7,player_id:'p1',observation_run_id:2};
+  let sql='';
+  const env={
+    WATCHER_TOKEN:'secret',
+    DB:{prepare(raw){sql=raw;return{async all(){return{results:[accepted]};}};}}
+  };
+  const response=await v029Worker.fetch(new Request('https://local.invalid/events',{
+    headers:{authorization:'Bearer secret'}
+  }),env,{});
+  assert.equal(response.status,200);
+  assert.deepEqual(await response.json(),[accepted]);
+  assert.match(sql,/e\.observation_run_id IS NULL OR \(r\.ok=1 AND r\.finished_at IS NOT NULL\)/);
+});
+
+test('v0.2.9 does not inherit unknown legacy routes',async()=>{
+  const response=await v029Worker.fetch(new Request('https://local.invalid/legacy-surprise'),{},{});
+  assert.equal(response.status,404);
+  assert.equal((await response.json()).error,'NOT_FOUND');
 });
 
 test('v0.2.9 health identifies the chunked-frame entrypoint',async()=>{
