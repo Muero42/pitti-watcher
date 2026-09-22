@@ -1,13 +1,13 @@
 # PITTI CURRENT STATE
 
-Updated: 2026-09-21
-Production watcher version: v0.2.9 (`95ae7e6e-f282-4c55-bdb3-ca5bf7caed49`)
-Feature candidate: v0.2.10 (`codex/watcher-p0-chunked-frames`)
+Updated: 2026-09-22
+Production watcher version: v0.2.10 (`0f495bd6-f72b-4451-8d39-714bc64f0864`)
+Production source: `42e55d3` (`codex/watcher-p0-chunked-frames`)
 Mode: POST_DRAFT / PRE_WEEK_1
 
 ## Source of truth
 
-This file is the canonical PITTI project checkpoint for chat handoffs. The feature branch was created directly from canonical `origin/main@749ba52`. Commits through `3c41ca1` were deployed as v0.2.9 after the user selected `AUTO`; v0.2.10 is the local follow-up that freezes each mutable player scope before chunk processing.
+This file is the canonical PITTI project checkpoint for chat handoffs. The feature branch was created directly from canonical `origin/main@749ba52`. v0.2.10 from clean commit `42e55d3` is deployed and freezes each mutable player scope before chunk processing.
 
 ## League / draft context
 
@@ -78,11 +78,10 @@ Draft-only return probability, ADP-return logic and opponent pick prediction are
 
 ## Next technical priorities
 
-1. Keep v0.2.9 serving accepted market frames while the Free D1 write limit is closed; do not generate recovery writes before the 00:00 UTC reset.
-2. Review and deploy v0.2.10 with additive migration `0004_player_state_scope_frames.sql` after reset, then verify that legacy run `3983` is failed and replaced by a fresh frozen-scope sweep.
-3. Capture live steady-state phase metadata for one changed and one unchanged player chunk; use it to finish budget calibration.
-4. Keep budget/outbox SQL in preview until reservation estimates and the pending limit are reviewed as a production migration.
-5. Only after that, connect roster-relative add/drop scoring in the Companion UI.
+1. Let frozen-scope run `4087` continue; verify atomic promotion, candidate/frame cleanup, and player-state recovery only when the complete sweep finalizes.
+2. Capture one unchanged player chunk and the eventual promotion invocation to finish write-budget calibration.
+3. Keep budget/outbox SQL in preview until reservation estimates and the pending limit are reviewed as a production migration.
+4. Only after that, connect roster-relative add/drop scoring in the Companion UI.
 
 
 ## Cloudflare D1 v0.2.4 hardening
@@ -145,4 +144,14 @@ Draft-only return probability, ADP-return logic and opponent pick prediction are
 - A complete serial frozen-frame player-state run against Sleeper finalized `PASS` with 4,363 observed entries, promoted 4,354 unique canonical players atomically, and left zero staged candidates and zero scope frames.
 - The bootstrap promotion reported 13,070 rows written; total measured bootstrap work remains roughly below 20,000 writes. Subsequent unchanged daily runs avoid candidate/canonical writes and retain only five frame inserts, bounded checkpoints, run control, and five frame deletions.
 - An intentionally overlapping accelerated continuation attempt failed its cursor guard and remained fail-closed. Normal validation used non-overlapping invocations; production's shortest continuation interval is five minutes.
-- Remote migration `0003` and v0.2.9 were deployed under `AUTO`. Migration `0004` and v0.2.10 remain local until the daily D1 quota resets. No external alert delivery or fantasy transaction was added.
+- Remote migration `0004` and v0.2.10 were deployed under `AUTO` after the daily D1 quota reset. No external alert delivery or fantasy transaction was added.
+
+### Production rollout verification — 2026-09-22
+
+- Remote migration state is current; `0004_player_state_scope_frames.sql` was the only pending migration and applied successfully at 05:37 UTC.
+- `/health` returns HTTP 200 and v0.2.10. The Companion gate remains overall `PASS`: market `PASS`, player-state deliberately `FAIL` until a complete frozen sweep is atomically accepted.
+- Real market run `4086` finalized `PASS` with 182 players on Worker version `0f495bd6-f72b-4451-8d39-714bc64f0864`. It used 22 ms CPU / 740 ms wall. Logged D1 phases totalled 203 queries, 4,695 rows read, 1,203 rows written, and 90.49 ms SQL time.
+- Legacy run `3983` is explicitly closed `WORK_FAILED`. The later pre-frame partial run `4080` was also closed `WORK_FAILED` by v0.2.10 rather than being resumed against a mutable source.
+- Fresh frozen-scope run `4087` captured a run-bound QB frame with 477 players, a stable ETag, and 76,826 bytes. Its initialization used 15 ms CPU / 504 ms wall; logged D1 phases used 4 queries, 3 reads, 1 write, and 4.47 ms SQL time.
+- A real 40-player chunk advanced run `4087` from QB offset 120 to 160 and left 16 run-bound candidates staged. It used 4 ms CPU / 246 ms wall. Logged D1 phases used 4 queries, 84 reads, 2 writes, and 4.80 ms SQL time.
+- Canonical player state remains unpromoted while the sweep is open. This is the intended fail-closed state; the immutable frame remains present and accepted market service remains healthy.

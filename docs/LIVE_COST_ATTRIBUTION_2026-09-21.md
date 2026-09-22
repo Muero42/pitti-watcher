@@ -64,3 +64,30 @@ The market lane is the write driver. Snapshot rows, evidence upserts, and retent
 - A fresh serial Workerd run against the real Sleeper sources accepted 4,363 observations and atomically promoted 4,354 unique players. Candidate and scope-frame tables were empty afterward.
 - Worst-case 40-player bootstrap chunk: frame load 1 query/1 row read; state load 1 query/40 rows read; candidate batch 40 queries/80 rows read/40 rows written; checkpoint 1 query/1 row read/1 row written. Including the active-sweep lookup, this stays at 44 D1 queries, below the Free-plan 50-query invocation cap.
 - Bootstrap promotion: 6 batched statements, 17,434 rows read, 13,070 rows written, 8 ms D1 SQL time, 21 ms local wall. This is the expensive first-fill case; unchanged steady-state chunks produce no candidate writes.
+
+## v0.2.10 production rollout — 2026-09-22
+
+- Additive migration `0004_player_state_scope_frames.sql` applied remotely with no other pending migration. Worker `0f495bd6-f72b-4451-8d39-714bc64f0864` serves `/health` version 0.2.10.
+- Market run `4086` finalized accepted with 182 players: 22 ms Worker CPU, 740 ms wall, and the following logged D1 phase totals:
+
+| Lane | Phase | Queries | Rows read | Rows written | D1 SQL time | Phase wall |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| market | state.load | 1 | 4,090 | 0 | 1.6159 ms | 24 ms |
+| market | frame.insert | 1 | 2 | 2 | 0.3114 ms | 34 ms |
+| market | evidence.batch | 200 | 600 | 1,200 | 88.2338 ms | 284 ms |
+| market | retention.prune | 1 | 3 | 1 | 0.3325 ms | 33 ms |
+| market | **logged total** | **203** | **4,695** | **1,203** | **90.4936 ms** | **375 ms** |
+
+- The v0.2.10 player initialization closed pre-frame partial run `4080` as `WORK_FAILED`, created run `4087`, and captured its immutable QB frame: 15 ms Worker CPU, 504 ms wall. Logged D1 phases totalled 4 queries, 3 reads, 1 write, 4.4716 ms SQL time, and 129 ms phase wall; source fetch added 146 ms wall without D1 work.
+- The observed 40-player QB chunk at offset 120 used 4 ms Worker CPU / 246 ms wall:
+
+| Lane | Phase | Queries | Rows read | Rows written | D1 SQL time | Phase wall |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| player_state | scope.frame.load | 1 | 1 | 0 | 1.1596 ms | 32 ms |
+| player_state | state.load | 1 | 80 | 0 | 2.8446 ms | 28 ms |
+| player_state | candidate.batch | 1 | 2 | 1 | 0.4938 ms | 34 ms |
+| player_state | checkpoint | 1 | 1 | 1 | 0.3057 ms | 31 ms |
+| player_state | **logged total** | **4** | **84** | **2** | **4.8037 ms** | **125 ms** |
+
+- After the chunk, run `4087` was open at QB offset/seen count 160, its 477-player/76,826-byte frame retained the capture ETag, and 16 candidates were staged. No candidate was visible as accepted canonical state. Companion remained overall `PASS` through the market lane while player-state remained fail-closed.
+- D1 phase metadata is attributable per query family; Worker CPU remains invocation-level and must not be fabricated per individual D1 query.
