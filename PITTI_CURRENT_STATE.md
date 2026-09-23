@@ -1,6 +1,6 @@
 # PITTI CURRENT STATE
 
-Updated: 2026-09-22
+Updated: 2026-09-23
 Production watcher version: v0.2.10 (`0f495bd6-f72b-4451-8d39-714bc64f0864`)
 Production source: `42e55d3` (`codex/watcher-p0-chunked-frames`)
 Mode: POST_DRAFT / PRE_WEEK_1
@@ -78,7 +78,7 @@ Draft-only return probability, ADP-return logic and opponent pick prediction are
 
 ## Next technical priorities
 
-1. Let frozen-scope run `4087` continue; verify atomic promotion, candidate/frame cleanup, and player-state recovery only when the complete sweep finalizes.
+1. Full live sweep `4087` is accepted; its candidate/frame cleanup and Companion player-state recovery are verified. Finish measurement calibration before budget activation.
 2. Capture one unchanged player chunk and the eventual promotion invocation to finish write-budget calibration.
 3. Keep budget/outbox SQL in preview until reservation estimates and the pending limit are reviewed as a production migration.
 4. Only after that, connect roster-relative add/drop scoring in the Companion UI.
@@ -155,3 +155,10 @@ Draft-only return probability, ADP-return logic and opponent pick prediction are
 - Fresh frozen-scope run `4087` captured a run-bound QB frame with 477 players, a stable ETag, and 76,826 bytes. Its initialization used 15 ms CPU / 504 ms wall; logged D1 phases used 4 queries, 3 reads, 1 write, and 4.47 ms SQL time.
 - A real 40-player chunk advanced run `4087` from QB offset 120 to 160 and left 16 run-bound candidates staged. It used 4 ms CPU / 246 ms wall. Logged D1 phases used 4 queries, 84 reads, 2 writes, and 4.80 ms SQL time.
 - Canonical player state remains unpromoted while the sweep is open. This is the intended fail-closed state; the immutable frame remains present and accepted market service remains healthy.
+
+### Full live sweep acceptance — 2026-09-23
+
+- D1 confirms run `4087` finished at `2026-09-23T01:07:58.606Z`, `ok=1`, `item_count=4363`, no error, scope index 5 and seen count 4,363.
+- Run-bound candidate and immutable-frame counts are both zero after acceptance. This is consistent with the tested atomic promotion/finalization/cleanup batch; no partial observation remains for this run.
+- Companion reports overall, market and player-state `PASS`, selecting `4087` as the latest accepted player observation. A subsequent scheduled sweep `4178` is open and does not hide or invalidate that accepted observation.
+- Promotion invocation CPU and D1 write metadata were not captured by this read-only completion check. Do not substitute the verification SELECT metadata or local bootstrap measurements for production promotion costs. Budget calibration and Git integration remain open for the agreed next work session; no budget/outbox activation occurred.

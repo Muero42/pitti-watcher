@@ -91,3 +91,7 @@ The market lane is the write driver. Snapshot rows, evidence upserts, and retent
 
 - After the chunk, run `4087` was open at QB offset/seen count 160, its 477-player/76,826-byte frame retained the capture ETag, and 16 candidates were staged. No candidate was visible as accepted canonical state. Companion remained overall `PASS` through the market lane while player-state remained fail-closed.
 - D1 phase metadata is attributable per query family; Worker CPU remains invocation-level and must not be fabricated per individual D1 query.
+
+## Full live sweep acceptance — 2026-09-23
+
+Run `4087` finalized successfully at `2026-09-23T01:07:58.606Z` with 4,363 observations across all five scopes. Read-only verification found zero candidates and zero frames for this run. Companion selected it as the latest accepted player observation and reported market/player/overall `PASS`. Production promotion CPU, wall time and write metadata were not captured by this completion check and remain a calibration gap; the SELECT verification costs are not promotion costs.
