@@ -1280,10 +1280,10 @@ async function stagePlayerStateEntries(env, at, runId, sourceScope, entries, exi
 async function promotePlayerStateRun(env, sweep) {
   const runId = Number(sweep.run_id);
   const context = { run_id: runId };
-  const countRow = await runPhase(env, 'player_state', 'promotion.load', context, () => env.DB.prepare(`
+  const countResult = await runPhase(env, 'player_state', 'promotion.load', context, () => env.DB.prepare(`
     SELECT COUNT(*) candidate_count FROM player_state_candidates WHERE run_id=?1
-  `).bind(runId).first());
-  const candidateCount = Number(countRow?.candidate_count || 0);
+  `).bind(runId).all());
+  const candidateCount = Number(countResult?.results?.[0]?.candidate_count || 0);
   const finishedAt = Date.now();
   const openGuard = `EXISTS(
     SELECT 1 FROM watcher_runs r JOIN player_state_sweeps s ON s.run_id=r.id

@@ -1,10 +1,38 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {acceptedLaneStatus,runLaneStatus,overallLaneGate,filterLaneEvents,buildFreeAgencyRadar} from '../src/index-v027.js';
+import {acceptedLaneStatus,runLaneStatus,overallLaneGate,filterLaneEvents,buildFreeAgencyRadar,companionFeed} from '../src/index-v027.js';
 
 const NOW=1_800_000_000_000;
 const okRun=age=>({ok:1,started_at:NOW-age,finished_at:NOW-age+1000,item_count:10});
 const failedRun={ok:0,started_at:NOW-10_000,finished_at:NOW-9000,item_count:0};
+
+test('Companion uses accepted started_at at the 36-hour boundary with open and failed newer attempts',async t=>{
+  t.mock.method(Date,'now',()=>NOW);
+  const HOUR=3600_000;
+  const accepted={id:1,ok:1,started_at:NOW-36*HOUR,finished_at:NOW-1000,item_count:4363};
+  const open={id:3,ok:0,started_at:NOW-500,finished_at:null,item_count:0};
+  let failure=null;
+  const env={DB:{prepare(sql){return{
+    async first(){
+      if(sql.includes("run_type='trending:scheduled'"))return null;
+      if(sql.includes("run_type='player_state:scheduled'")){
+        if(sql.includes('AND ok=1'))return accepted;
+        if(sql.includes('AND ok=0'))return failure;
+        return open;
+      }
+      throw new Error(`Unexpected query: ${sql}`);
+    },
+    async all(){assert.match(sql,/FROM evidence_events/);return{results:[]};}
+  };}}};
+  const gate=async()=> (await (await companionFeed(new Request('https://local.invalid/companion-feed'),env,{})).json()).gate.player_state_status;
+  assert.equal(await gate(),'PASS');
+  accepted.started_at--;
+  assert.equal(await gate(),'STALE','recent finish must not refresh an old frozen observation');
+  accepted.started_at=NOW-2*HOUR;
+  assert.equal(await gate(),'PASS');
+  failure={id:2,...failedRun};
+  assert.equal(await gate(),'FAIL','completed newer failure closes the lane even with an open attempt');
+});
 
 test('market PASS survives player-state FAIL',()=>{
   const market=runLaneStatus(okRun(10*60_000),45*60_000,NOW);
