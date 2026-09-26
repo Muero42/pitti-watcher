@@ -97,6 +97,18 @@ function fixture(t){
   };
 }
 
+test('scheduled market cron routes to frame capture and completes a trending run',async t=>{
+  const f=fixture(t);
+  const waits=[];
+  await v029Worker.scheduled({cron:'*/15 * * * *'},f.env,{waitUntil(promise){waits.push(promise);}});
+  assert.equal(waits.length,1);
+  await Promise.all(waits);
+  assert.equal(f.runs.length,1);
+  assert.equal(f.runs[0].run_type,'trending:scheduled');
+  assert.equal(f.runs[0].ok,1);
+  assert.equal(f.calls.frameInserts,1);
+});
+
 test('market lane writes one compact frame, retains two frames, and emits transitions only',async t=>{
   const f=fixture(t);
   for(let stage=0;stage<4;stage++){

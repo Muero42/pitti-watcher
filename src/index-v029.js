@@ -9,7 +9,7 @@ import {
 
 const VERSION='0.2.10';
 const MARKET_CRON='*/15 * * * *';
-const PLAYER_STATE_CONTINUATION_CRON='2,7,12,22,37,52 * * * *';
+const PLAYER_STATE_CONTINUATION_CRON='2,7,12,22,27,32,37,42,47,52,57 * * * *';
 
 function jsonCors(data,status=200){
   return new Response(JSON.stringify(data,null,2),{status,headers:{

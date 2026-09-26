@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
 import {
   beginChunkedPlayerStateSweep,
   continueChunkedPlayerStateSweep,
@@ -45,7 +46,7 @@ function fixture(t,{count=95,changedCount=count,failCheckpointOnce=false,failPro
   const candidates=new Map();
   const frames=new Map();
   const evidence=new Map();
-  const calls={fetches:[],checkpointAttempts:0,batchSizes:[]};
+  const calls={fetches:[],checkpointAttempts:0,batchSizes:[],queries:[],batches:[]};
   let failCheckpoint=failCheckpointOnce;
   let failPromotion=failPromotionOnce;
 
@@ -55,6 +56,7 @@ function fixture(t,{count=95,changedCount=count,failCheckpointOnce=false,failPro
       const statement=(args=[])=>(
         {sql,args,bind(...values){return statement(values);},
         async first(){
+          calls.queries.push({method:'first',sql,args});
           if(sql.startsWith('INSERT INTO watcher_runs')){
             const row={id:runs.length+1,run_type:args[0],started_at:args[1],finished_at:null,ok:0,item_count:0,error:null};
             runs.push(row);return{id:row.id};
@@ -65,12 +67,14 @@ function fixture(t,{count=95,changedCount=count,failCheckpointOnce=false,failPro
           }
           if(sql.startsWith('SELECT finished_at,ok,item_count,error'))return runs.find(r=>r.id===args[0])||null;
           if(sql.startsWith('SELECT finished_at,ok,item_count FROM watcher_runs'))return runs.find(r=>r.id===args[0])||null;
-          if(sql.startsWith('SELECT COUNT(*) candidate_count')){
-            return{candidate_count:[...candidates.values()].filter(row=>row.run_id===args[0]).length};
-          }
           throw new Error(`Unexpected first: ${sql}`);
         },
         async all(){
+          calls.queries.push({method:'all',sql,args});
+          if(sql.startsWith('SELECT COUNT(*) candidate_count')){
+            const count=[...candidates.values()].filter(row=>row.run_id===args[0]).length;
+            return{results:[{candidate_count:count}],meta:{rows_read:count,rows_written:0,timings:{sql_duration_ms:1.25}}};
+          }
           if(sql.startsWith('SELECT run_id,source_scope,captured_at,source_etag,player_count,frame_json')){
             const row=frames.get(`${args[0]}:${args[1]}`);
             return{results:row?[{...row}]:[],meta:{rows_read:row?1:0,rows_written:0}};
@@ -86,6 +90,7 @@ function fixture(t,{count=95,changedCount=count,failCheckpointOnce=false,failPro
           throw new Error(`Unexpected all: ${sql}`);
         },
         async run(){
+          calls.queries.push({method:'run',sql,args});
           if(sql.startsWith('INSERT INTO player_state_scope_frames')){
             const key=`${args[0]}:${args[1]}`;
             if(frames.has(key))return success(0);
@@ -125,6 +130,7 @@ function fixture(t,{count=95,changedCount=count,failCheckpointOnce=false,failPro
       return statement();
     },
     async batch(statements){
+      calls.batches.push(statements);
       calls.batchSizes.push(statements.length);
       if(failPromotion&&statements.some(stmt=>stmt.sql.includes('UPDATE watcher_runs SET finished_at'))){
         failPromotion=false;
@@ -351,4 +357,79 @@ test('v0.2.9 ignores unknown cron expressions instead of starting market work',a
   await v029Worker.scheduled({cron:'3 3 * * 0'}, {}, {waitUntil(promise){waits.push(promise);}});
   assert.equal(waits.length,0);
   assert.deepEqual(logs,[{event:'watcher_cron_ignored',cron:'3 3 * * 0'}]);
+});
+
+const continuationCron='2,7,12,22,27,32,37,42,47,52,57 * * * *';
+async function scheduled(cron,env){
+  const waits=[];
+  await v029Worker.scheduled({cron},env,{waitUntil(promise){waits.push(promise);}});
+  assert.equal(waits.length,1);
+  return (await Promise.all(waits))[0];
+}
+
+test('configured continuation cadence matches the active runtime and avoids other schedules',()=>{
+  const config=JSON.parse(readFileSync(new URL('../wrangler.jsonc',import.meta.url),'utf8'));
+  const runtime=readFileSync(new URL('../src/index-v029.js',import.meta.url),'utf8');
+  assert.equal(config.main,'src/index-v029.js');
+  assert.equal(config.vars.PLAYER_STATE_CHUNK_SIZE,'40');
+  assert.deepEqual(config.triggers.crons,['*/15 * * * *','17 4 * * *',continuationCron]);
+  assert.equal(runtime.match(/const PLAYER_STATE_CONTINUATION_CRON='([^']+)'/)[1],continuationCron);
+  const minutes=continuationCron.split(' ')[0].split(',').map(Number);
+  assert.equal(new Set(minutes).size,11);
+  assert.ok(minutes.every(minute=>minute%15!==0&&minute!==17));
+});
+
+for(const count of [0,41])test(`scheduled start, continuation and promotion preserve count ${count} and D1 metadata`,async t=>{
+  const f=fixture(t,{count});
+  const logs=[];
+  t.mock.method(console,'log',value=>logs.push(JSON.parse(value)));
+  const first=await scheduled('17 4 * * *',f.env);
+  assert.equal(first.captured,true);
+  assert.equal(f.runs.length,1);
+  assert.equal(f.runs[0].run_type,'player_state:scheduled');
+  let result;
+  for(let i=0;i<20;i++){
+    result=await scheduled(continuationCron,f.env);
+    if(result.complete)break;
+  }
+  assert.equal(result.complete,true);
+  assert.equal(result.promoted,count);
+  assert.equal(f.sweeps.get(1).promotion_offset,count);
+  assert.equal(f.runs[0].item_count,count);
+  assert.equal(f.runs[0].ok,1);
+  const counts=f.calls.queries.filter(query=>query.sql.startsWith('SELECT COUNT(*) candidate_count'));
+  assert.equal(counts.length,1);
+  assert.equal(counts[0].method,'all');
+  const commits=f.calls.batches.filter(batch=>batch.some(stmt=>stmt.sql.startsWith('UPDATE watcher_runs SET finished_at')));
+  assert.equal(commits.length,1);
+  assert.equal(commits[0].length,6);
+  assert.equal(commits[0][2].args[0],count);
+  assert.equal(commits[0][3].args[3],count,'finalization guard uses the same candidate count');
+  const loadLogs=logs.filter(row=>row.phase==='promotion.load'&&row.state==='ok');
+  assert.equal(loadLogs.length,1);
+  const {query_count,rows_read,rows_written,sql_ms}=loadLogs[0];
+  assert.deepEqual({query_count,rows_read,rows_written,sql_ms},{query_count:1,rows_read:count,rows_written:0,sql_ms:1.25});
+  assert.equal(f.candidates.size,0);
+  assert.equal(f.frames.size,0);
+
+  const snapshot=()=>JSON.stringify([f.runs,[...f.sweeps],[...f.candidates],[...f.frames],[...f.evidence],[...f.state],f.calls.batches,f.calls.fetches]);
+  const before=snapshot();
+  f.calls.queries.length=0;
+  for(let i=0;i<3;i++)assert.deepEqual(await scheduled(continuationCron,f.env),{ok:true,idle:true});
+  assert.equal(snapshot(),before);
+  assert.equal(f.calls.queries.length,3);
+  assert.ok(f.calls.queries.every(query=>query.method==='first'&&query.sql.startsWith('SELECT s.run_id')));
+});
+
+test('idle scheduled continuation before any run only checks for an active sweep',async t=>{
+  const f=fixture(t);
+  assert.deepEqual(await scheduled(continuationCron,f.env),{ok:true,idle:true});
+  assert.equal(f.calls.queries.length,1);
+  assert.match(f.calls.queries[0].sql,/^SELECT s.run_id/);
+  assert.equal(f.calls.queries[0].method,'first');
+  assert.equal(f.runs.length,0);
+  assert.equal(f.candidates.size,0);
+  assert.equal(f.evidence.size,0);
+  assert.equal(f.calls.batches.length,0);
+  assert.equal(f.calls.fetches.length,0);
 });
