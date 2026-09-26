@@ -1,6 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ownershipStatus, buildFreeAgencyRadar, marketSignals, previousTrendingSnapshotSql } from '../src/index.js';
+import { ownershipStatus, buildFreeAgencyRadar, marketSignals, previousTrendingSnapshotSql, timingSafeStringEqual } from '../src/index.js';
+
+test('watcher token comparison accepts only the exact secret',async()=>{
+  assert.equal(await timingSafeStringEqual('secret-value','secret-value'),true);
+  assert.equal(await timingSafeStringEqual('secret-value','secret-other'),false);
+  assert.equal(await timingSafeStringEqual('','secret-value'),false);
+});
 
 test('ownershipStatus distinguishes mine, opponent, and free agent', () => {
   const league={ownership:{
