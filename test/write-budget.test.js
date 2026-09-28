@@ -118,3 +118,50 @@ test('D1 usage sums batch metadata and fails closed when metadata is absent', ()
   ]), { rowsRead: 7, rowsWritten: 3, sqlDurationMs: 2, queries: 2 });
   assert.throws(() => d1Usage({ success: true, meta: { changes: 1 } }), { code: 'D1_USAGE_META_MISSING' });
 });
+
+const usageResult = () => ({success:true,meta:{rows_read:0,rows_written:0,duration:0}});
+for (const field of ['rows_read','rows_written','duration','sql_duration_ms']) {
+  for (const value of [null,undefined,NaN,Infinity,-Infinity,-1,'0','',false,{},[]]) {
+    test(`D1 usage rejects ${field}=${String(value)} (${typeof value})`, () => {
+      const result=usageResult();
+      if(field==='sql_duration_ms') {
+        delete result.meta.duration;
+        result.meta.timings={sql_duration_ms:value};
+      } else result.meta[field]=value;
+      assert.throws(()=>d1Usage(result),{code:'D1_USAGE_META_MISSING'});
+    });
+  }
+}
+
+test('D1 usage rejects empty, sparse, missing and failed results, including mixed batches',()=>{
+  for(const result of [[],new Array(1),null,undefined,{}, {meta:null},
+    {...usageResult(),success:false},[usageResult(),null]]) {
+    assert.throws(()=>d1Usage(result),{code:'D1_USAGE_META_MISSING'});
+  }
+});
+
+test('D1 usage preserves zero, primary duration precedence and valid fallback',()=>{
+  const zero={rowsRead:0,rowsWritten:0,sqlDurationMs:0,queries:1};
+  assert.deepEqual(d1Usage(usageResult()),zero);
+  assert.deepEqual(d1Usage({meta:{rows_read:0,rows_written:0,
+    timings:{sql_duration_ms:0},duration:99}}),zero);
+  for(const primary of [null,undefined]) {
+    assert.equal(d1Usage({meta:{rows_read:0,rows_written:0,
+      timings:{sql_duration_ms:primary},duration:0.25}}).sqlDurationMs,0.25);
+  }
+  for(const primary of [NaN,Infinity,-1,'0']) {
+    assert.throws(()=>d1Usage({meta:{rows_read:0,rows_written:0,
+      timings:{sql_duration_ms:primary},duration:1}}),{code:'D1_USAGE_META_MISSING'});
+  }
+});
+
+test('D1 usage rejects fractional row counts and aggregate overflow',()=>{
+  for(const field of ['rows_read','rows_written']) {
+    const fractional=usageResult(); fractional.meta[field]=0.5;
+    assert.throws(()=>d1Usage(fractional),{code:'D1_USAGE_META_MISSING'});
+    const large=usageResult(); large.meta[field]=Number.MAX_SAFE_INTEGER;
+    assert.throws(()=>d1Usage([large,large]),{code:'D1_USAGE_META_MISSING'});
+  }
+  const large=usageResult(); large.meta.duration=Number.MAX_VALUE;
+  assert.throws(()=>d1Usage([large,large]),{code:'D1_USAGE_META_MISSING'});
+});

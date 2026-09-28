@@ -176,21 +176,28 @@ export async function abandonUnusedWriteBudget(db, reservation, at = Date.now())
 
 export function d1Usage(result) {
   const results = Array.isArray(result) ? result : [result];
-  return results.reduce((sum, item) => {
-    const rowsRead = Number(item?.meta?.rows_read);
-    const rowsWritten = Number(item?.meta?.rows_written);
-    const sqlMs = Number(item?.meta?.timings?.sql_duration_ms ?? item?.meta?.duration);
-    if (![rowsRead, rowsWritten, sqlMs].every(Number.isFinite)) {
+  const fail = () => {
       const error = new Error('D1_USAGE_META_MISSING');
       error.code = 'D1_USAGE_META_MISSING';
       throw error;
-    }
+  };
+  if (!results.length) fail();
+  const sum = { rowsRead: 0, rowsWritten: 0, sqlDurationMs: 0, queries: 0 };
+  for (const item of results) {
+    const rowsRead = item?.meta?.rows_read;
+    const rowsWritten = item?.meta?.rows_written;
+    const sqlMs = item?.meta?.timings?.sql_duration_ms ?? item?.meta?.duration;
+    if (item?.success === false ||
+        ![rowsRead, rowsWritten].every(value => Number.isSafeInteger(value) && value >= 0) ||
+        !Number.isFinite(sqlMs) || sqlMs < 0) fail();
     sum.rowsRead += rowsRead;
     sum.rowsWritten += rowsWritten;
     sum.sqlDurationMs += sqlMs;
     sum.queries += 1;
-    return sum;
-  }, { rowsRead: 0, rowsWritten: 0, sqlDurationMs: 0, queries: 0 });
+    if (!Number.isSafeInteger(sum.rowsRead) || !Number.isSafeInteger(sum.rowsWritten) ||
+        !Number.isFinite(sum.sqlDurationMs)) fail();
+  }
+  return sum;
 }
 
 export { DAY_MS };
