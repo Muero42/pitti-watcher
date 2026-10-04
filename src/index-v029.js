@@ -1,4 +1,5 @@
 import v027Worker,{acceptedEvidenceSql,companionFeed} from './index-v027.js';
+import {recordPlayerStateInvocation} from './player-state-invocations.js';
 import {
   beginChunkedPlayerStateSweep,
   continueChunkedPlayerStateSweep,
@@ -54,11 +55,13 @@ export default {
   async scheduled(controller,env,ctx){
     const cron=controller.cron||'';
     if(cron==='17 4 * * *'){
-      ctx.waitUntil(beginChunkedPlayerStateSweep(env,Date.now()));
+      ctx.waitUntil(recordPlayerStateInvocation(env,controller,'daily_start',
+        (context,at)=>beginChunkedPlayerStateSweep(env,at,context)));
       return;
     }
     if(cron===PLAYER_STATE_CONTINUATION_CRON){
-      ctx.waitUntil(continueChunkedPlayerStateSweep(env));
+      ctx.waitUntil(recordPlayerStateInvocation(env,controller,'continuation',
+        context=>continueChunkedPlayerStateSweep(env,context)));
       return;
     }
     if(cron===MARKET_CRON){

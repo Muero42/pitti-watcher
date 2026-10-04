@@ -46,13 +46,17 @@ function fixture(t,{count=95,changedCount=count,failCheckpointOnce=false,failPro
   const candidates=new Map();
   const frames=new Map();
   const evidence=new Map();
-  const calls={fetches:[],checkpointAttempts:0,batchSizes:[],queries:[],batches:[]};
+  const calls={fetches:[],checkpointAttempts:0,batchSizes:[],queries:[],batches:[],ledger:[]};
   let failCheckpoint=failCheckpointOnce;
   let failPromotion=failPromotionOnce;
 
   const DB={
     prepare(raw){
       const sql=raw.replace(/\s+/g,' ').trim();
+      // Shadow statements do not change the fixture's core-query assertions.
+      if(sql.includes('player_state_invocations')) return {
+        bind(...args){calls.ledger.push({sql,args});return this;},async run(){return success();}
+      };
       const statement=(args=[])=>(
         {sql,args,bind(...values){return statement(values);},
         async first(){
@@ -387,6 +391,8 @@ for(const count of [0,41])test(`scheduled start, continuation and promotion pres
   assert.equal(first.captured,true);
   assert.equal(f.runs.length,1);
   assert.equal(f.runs[0].run_type,'player_state:scheduled');
+  const dailyFinish=f.calls.ledger.find(row=>row.sql.startsWith('UPDATE'));
+  assert.deepEqual(dailyFinish.args.slice(1,5),[f.runs[0].id,0,0,'ok']);
   let result;
   for(let i=0;i<20;i++){
     result=await scheduled(continuationCron,f.env);
@@ -411,6 +417,11 @@ for(const count of [0,41])test(`scheduled start, continuation and promotion pres
   assert.deepEqual({query_count,rows_read,rows_written,sql_ms},{query_count:1,rows_read:count,rows_written:0,sql_ms:1.25});
   assert.equal(f.candidates.size,0);
   assert.equal(f.frames.size,0);
+
+  const ledgerFinishes=f.calls.ledger.filter(row=>row.sql.startsWith('UPDATE'));
+  assert.ok(ledgerFinishes.length>1,'continuations each have a finish');
+  assert.ok(ledgerFinishes.every(row=>row.args[1]===f.runs[0].id));
+  assert.equal(ledgerFinishes.at(-1).args[2],5,'promotion invocation has sealed cursor');
 
   const snapshot=()=>JSON.stringify([f.runs,[...f.sweeps],[...f.candidates],[...f.frames],[...f.evidence],[...f.state],f.calls.batches,f.calls.fetches]);
   const before=snapshot();

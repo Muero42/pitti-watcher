@@ -1132,8 +1132,9 @@ async function activeChunkedPlayerStateSweep(env) {
   `).first();
 }
 
-async function initializeChunkedPlayerStateSweep(env, at, source = 'scheduled', existingRunId = null) {
+async function initializeChunkedPlayerStateSweep(env, at, source = 'scheduled', existingRunId = null, invocationContext = null) {
   const runId = existingRunId ?? await startRun(env, 'player_state', at, source);
+  if (invocationContext) Object.assign(invocationContext,{run_id:runId,scope_index:0,scope_offset:0});
   try {
     const result = await env.DB.prepare(`
       INSERT INTO player_state_sweeps(
@@ -1344,7 +1345,7 @@ async function promotePlayerStateRun(env, sweep) {
   return { ok: true, complete: true, seen: Number(sweep.seen_count), promoted: candidateCount };
 }
 
-async function processPlayerStateSweepChunk(env, sweep) {
+async function processPlayerStateSweepChunk(env, sweep, invocationContext = null) {
   const index = Number(sweep.next_index);
   const offset = Number(sweep.scope_offset || 0);
   if (!Number.isSafeInteger(index) || index < 0 || index > PLAYER_STATE_SCOPES.length ||
@@ -1373,7 +1374,7 @@ async function processPlayerStateSweepChunk(env, sweep) {
     // upstream response. It cannot be proven coherent, so close it and start a
     // fresh run whose scopes are frozen before any candidate comparison.
     await safeFinishRun(env, Number(sweep.run_id), false, 0);
-    const replacement = await initializeChunkedPlayerStateSweep(env, Date.now(), 'scheduled');
+    const replacement = await initializeChunkedPlayerStateSweep(env, Date.now(), 'scheduled', null, invocationContext);
     return { ...replacement, restarted_legacy_sweep: true };
   }
   if (!frame) {
@@ -1428,17 +1429,20 @@ async function processPlayerStateSweepChunk(env, sweep) {
   };
 }
 
-async function beginChunkedPlayerStateSweep(env, at = Date.now()) {
+async function beginChunkedPlayerStateSweep(env, at = Date.now(), invocationContext = null) {
   const prior = await activeChunkedPlayerStateSweep(env);
   if (prior) await safeFinishRun(env, Number(prior.run_id), false, 0);
-  return initializeChunkedPlayerStateSweep(env, at, 'scheduled');
+  return initializeChunkedPlayerStateSweep(env, at, 'scheduled', null, invocationContext);
 }
 
-async function continueChunkedPlayerStateSweep(env) {
+async function continueChunkedPlayerStateSweep(env, invocationContext = null) {
   const sweep = await activeChunkedPlayerStateSweep(env);
   if (!sweep) return { ok: true, idle: true };
+  if (invocationContext) Object.assign(invocationContext,{
+    run_id:Number(sweep.run_id),scope_index:Number(sweep.next_index),scope_offset:Number(sweep.scope_offset || 0)
+  });
   try {
-    return await processPlayerStateSweepChunk(env, sweep);
+    return await processPlayerStateSweepChunk(env, sweep, invocationContext);
   } catch (error) {
     return rejectWorkFailure(env, Number(sweep.run_id), error);
   }

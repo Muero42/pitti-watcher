@@ -15,7 +15,10 @@ export const BILLABLE_WRITE_ESTIMATES = Object.freeze({
   retentionDelete: 2,
   checkpoint: 1,
   runStart: 2,
-  runFinish: 1,
+  runFinish: 2,
+  // One reservation plus one settle OR unused-abandon, including their SQL
+  // triggers/indexes. Run lifecycle and domain/outbox writes are separate.
+  // Local worst path: first reserve 5 + terminal operation 3 = 8; retain 10.
   budgetControl: 10
 });
 
