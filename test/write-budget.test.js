@@ -53,6 +53,8 @@ test('daily windows are UTC-aligned and lane limits fail closed when absent', ()
 });
 
 test('billable estimates include outbox and budget-control overhead', () => {
+  assert.equal(BILLABLE_WRITE_ESTIMATES.runFinish,2,'local D1 zero-evidence finalization writes');
+  assert.equal(BILLABLE_WRITE_ESTIMATES.budgetControl,10,'measured reserve 5 + terminal 3; retain margin 2');
   assert.equal(BILLABLE_WRITE_ESTIMATES.evidenceWithOutbox, 9,
     'local D1 measured 6 evidence writes plus 3 incremental outbox writes');
   const estimate = estimateBillableWrites({

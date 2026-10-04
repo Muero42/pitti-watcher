@@ -4,7 +4,8 @@ import {createRequire} from 'node:module';
 import {readFileSync, mkdtempSync, realpathSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
-import {BILLABLE_WRITE_ESTIMATES} from '../src/write-budget.js';
+import {BILLABLE_WRITE_ESTIMATES, d1Usage, reserveDailyWriteBudget, settleWriteBudget,
+  abandonUnusedWriteBudget, writeBudgetLimit} from '../src/write-budget.js';
 
 // No repository Wrangler config, credentials, persistent database or remote binding.
 process.env.WRANGLER_SEND_METRICS = 'false';
@@ -12,29 +13,26 @@ process.env.WRANGLER_LOG_PATH = join(mkdtempSync(join(tmpdir(), 'pitti-d1-log-')
 const require = createRequire(import.meta.url);
 const packagePath = realpathSync(process.argv[2] ? resolve(process.argv[2]) : require.resolve('wrangler/package.json'));
 const runtimeRequire = createRequire(packagePath);
-const {Miniflare} = runtimeRequire('miniflare');
+const {Miniflare, convertV4MiniflareOptions} = runtimeRequire('miniflare');
 const {unstable_splitSqlQuery: splitSql} = runtimeRequire(packagePath.replace(/package\.json$/, 'wrangler-dist/cli.js'));
 const read = path => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 const versions = {
   wrangler: JSON.parse(readFileSync(packagePath, 'utf8')).version,
   miniflare: runtimeRequire('miniflare/package.json').version
 };
-const mf = new Miniflare({
+const localOptions = {
   modules: true, script: 'export default {fetch(){return new Response("local calibration only")}}',
   compatibilityDate: '2025-08-03', cf: false,
   d1Databases: {DB: 'pitti-disposable-outbox-calibration'}, d1Persist: false,
   outboundService() { throw new Error('NETWORK_DISABLED'); }
-});
+};
+// Miniflare 5 exposes an explicit adapter for the established v4 local options.
+const mf = new Miniflare(convertV4MiniflareOptions ? convertV4MiniflareOptions(localOptions) : localOptions);
 const report = {verdict: 'CALIBRATION_INCONCLUSIVE', versions, cases: []};
 function metadata(result) {
-  assert.equal(result.success, true);
-  const meta = result.meta;
-  for (const field of ['rows_read', 'rows_written']) {
-    assert.ok(Number.isSafeInteger(meta?.[field]) && meta[field] >= 0, `Missing/invalid D1 ${field}`);
-  }
-  const duration = meta.timings?.sql_duration_ms ?? meta.duration;
-  return {queries: 1, rows_read: meta.rows_read, rows_written: meta.rows_written,
-    sql_ms: Number.isFinite(duration) ? duration : null};
+  const usage = d1Usage(result);
+  return {queries: usage.queries, rows_read: usage.rowsRead, rows_written: usage.rowsWritten,
+    sql_ms: usage.sqlDurationMs};
 }
 try {
   const db = await mf.getD1Database('DB');
@@ -63,6 +61,7 @@ try {
     for (let i = 0; i < n; i++) item.evidence_inserts.push(metadata(await db.prepare(insert).bind(`fixture-${i}`).run()));
     if (n === 3) item.duplicate_insert = metadata(await db.prepare(insert).bind('fixture-0').run());
     assert.equal((await db.prepare('SELECT COUNT(*) n FROM evidence_events WHERE observation_run_id=1').first()).n, n);
+    assert.equal((await db.prepare('SELECT COUNT(*) n FROM alert_outbox').first()).n,0,'open observation never becomes pending');
     item.finalization = metadata(await db.prepare(
       'UPDATE watcher_runs SET finished_at=?1,ok=1,item_count=?2,error=NULL WHERE id=?3 AND finished_at IS NULL'
     ).bind(200, n, 1).run());
@@ -73,6 +72,76 @@ try {
     item.pending_outbox = rows.length;
   }
   const [zero, one, three] = report.cases;
+  assert.equal(zero.finalization.rows_written,2,'zero-evidence finalization baseline');
+  assert.equal(BILLABLE_WRITE_ESTIMATES.runFinish,zero.finalization.rows_written);
+  // Exercise the actual helpers, adapting first() only to retain real D1 metadata.
+  report.control_phases = [];
+  let phase;
+  const measuredDb = {prepare(sql) {return {bind(...args) {return {async first() {
+    const result = await db.prepare(sql).bind(...args).run();
+    report.control_phases.push({phase, ...metadata(result)});
+    return result.results[0] ?? null;
+  }}}}}};
+  const at = Date.UTC(2026, 9, 3, 12);
+  const reserve = async (id, writes, limit = 100, name = 'write_budget.reserve.subsequent') => {
+    phase = name;
+    return reserveDailyWriteBudget(measuredDb, {lane:'market',requestedWrites:writes,limitWrites:limit,at,id});
+  };
+  const full = await reserve('full', 30, 100, 'write_budget.reserve.first');
+  const partial = await reserve('partial', 30);
+  phase = 'write_budget.settle.full'; await settleWriteBudget(measuredDb, full, 30, at);
+  phase = 'write_budget.settle.partial'; await settleWriteBudget(measuredDb, partial, 10, at);
+  const unused = await reserve('unused', 20);
+  phase = 'write_budget.abandon'; await abandonUnusedWriteBudget(measuredDb, unused, at);
+  const window = () => db.prepare("SELECT reserved_writes,committed_writes FROM write_budget_windows WHERE lane='market'").first();
+  assert.deepEqual(await window(), {reserved_writes:0,committed_writes:40});
+  phase = 'write_budget.duplicate_terminal';
+  for (const action of [() => settleWriteBudget(measuredDb, full, 30, at),
+    () => abandonUnusedWriteBudget(measuredDb, unused, at),
+    () => abandonUnusedWriteBudget(measuredDb, full, at)]) await assert.rejects(action);
+  assert.deepEqual(await window(), {reserved_writes:0,committed_writes:40}, 'no double release');
+  await assert.rejects(reserve('mismatch', 1, 101), error => error.cause?.message.includes('WRITE_BUDGET_CONFIG_MISMATCH'));
+  for (const limit of [undefined,null,0,-1,NaN,Infinity,'invalid']) {
+    assert.throws(() => writeBudgetLimit({D1_MARKET_DAILY_WRITE_BUDGET:limit}, 'market'));
+    await assert.rejects(reserve('invalid',1,limit === undefined ? NaN : limit));
+  }
+  const held = await reserve('held', 60);
+  await assert.rejects(reserve('exhausted',1), {code:'WRITE_BUDGET_EXCEEDED'});
+  await assert.rejects(settleWriteBudget(measuredDb,held,61,at), {code:'WRITE_BUDGET_SETTLEMENT_INVALID'});
+  await assert.rejects(db.prepare("UPDATE write_budget_reservations SET status='committed',committed_writes=61 WHERE reservation_id='held'").run());
+  // Modeled caller: only unused reservations may be abandoned. Once a domain
+  // write is attempted, ambiguous outcomes hold allowance for reconciliation.
+  let attempted = false;
+  const releaseUnused = () => {
+    assert.equal(attempted,false,'domain attempt prohibits automatic release');
+    return abandonUnusedWriteBudget(measuredDb,held,at);
+  };
+  assert.equal((await db.prepare("SELECT status FROM write_budget_reservations WHERE reservation_id='held'").first()).status,'reserved');
+  attempted = true; // reservation above precedes this real disposable domain write
+  await db.prepare("INSERT INTO watcher_runs(run_type,started_at) VALUES('fixture:domain',100)").run();
+  assert.throws(releaseUnused);
+  assert.equal((await db.prepare("SELECT status FROM write_budget_reservations WHERE reservation_id='held'").first()).status,'reserved');
+  assert.deepEqual(await window(), {reserved_writes:60,committed_writes:40});
+  const boundary = await Promise.allSettled([reserve('race-a',1),reserve('race-b',1)]);
+  assert.ok(boundary.every(result => result.status==='rejected' && result.reason.code==='WRITE_BUDGET_EXCEEDED'));
+  phase = 'write_budget.reserve.concurrent_first';
+  const concurrent = await Promise.allSettled(['concurrent-a','concurrent-b'].map(id =>
+    reserveDailyWriteBudget(measuredDb,{lane:'player_state',requestedWrites:6,limitWrites:10,at,id})));
+  assert.equal(concurrent.filter(r=>r.status==='fulfilled').length,1);
+  assert.equal(concurrent.filter(r=>r.status==='rejected'&&r.reason.code==='WRITE_BUDGET_EXCEEDED').length,1);
+  const actualCosts = report.control_phases.slice(0,6);
+  assert.deepEqual(actualCosts.map(x=>[x.phase,x.queries,x.rows_read,x.rows_written]),[
+    ['write_budget.reserve.first',1,6,5],['write_budget.reserve.subsequent',1,6,4],
+    ['write_budget.settle.full',1,4,3],['write_budget.settle.partial',1,4,3],
+    ['write_budget.reserve.subsequent',1,6,4],['write_budget.abandon',1,4,3]
+  ]);
+  const overhead = Math.max(actualCosts[0].rows_written,actualCosts[1].rows_written)
+    + Math.max(...actualCosts.slice(2).filter(x=>!x.phase.includes('reserve')).map(x=>x.rows_written));
+  assert.ok(BILLABLE_WRITE_ESTIMATES.budgetControl>=overhead);
+  report.control_envelope={reservation_plus_one_terminal:overhead,estimate:BILLABLE_WRITE_ESTIMATES.budgetControl,
+    margin:BILLABLE_WRITE_ESTIMATES.budgetControl-overhead};
+  assert.equal((await db.prepare('SELECT COUNT(*) n FROM write_budget_reservations WHERE committed_writes>reserved_writes').first()).n,0);
+  report.fail_closed_semantics = 'PASS';
   const baseline = zero.finalization.rows_written;
   const incremental = one.finalization.rows_written - baseline;
   const evidence = one.evidence_inserts[0].rows_written;
@@ -83,8 +152,9 @@ try {
   report.incremental_outbox_rows_written = incremental;
   report.evidence_plus_outbox_rows_written = evidence + incremental;
   report.estimate = BILLABLE_WRITE_ESTIMATES.evidenceWithOutbox;
+  assert.equal(evidence + incremental,9);
   report.verdict = report.estimate >= evidence + incremental
-    ? (report.estimate === 8 ? 'CALIBRATION_PASS_KEEP_8' : `CALIBRATION_PASS_RECALIBRATED_${report.estimate}`)
+    ? 'RESERVATION_SETTLEMENT_CALIBRATION_PASS'
     : 'CALIBRATION_INCONCLUSIVE';
   if (report.estimate < evidence + incremental) {
     report.reason = `Estimate ${report.estimate} is below measured cost ${evidence + incremental}`;

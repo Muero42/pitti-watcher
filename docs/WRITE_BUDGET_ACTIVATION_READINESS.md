@@ -28,9 +28,11 @@ evidenceWithOutbox value 9: six writes per new evidence row plus three
 incremental outbox writes, excluding the two-write finalization baseline.
 The three-event fixture verifies scaling and duplicate-fingerprint behavior.
 It does not establish all reservation/control costs or daily limits. In
-particular, runFinish remains a provisional estimate of 1 while that local
-fixture measured a baseline of 2; budgetControl headroom must be attributed
-and validated rather than assumed to cover the difference.
+particular, the 2026-10-04 disposable calibration reproduces finalization baseline
+2 and corrects runFinish to 2. Reservation writes are 5 for the first window and
+4 thereafter; settlement/unused abandon each write 3. budgetControl=10 is retained
+for the explicitly defined reserve-plus-one-terminal envelope (worst 8, margin 2).
+This does not validate unbounded reconciliation or external recovery capacity.
 
 [Live cost attribution](LIVE_COST_ATTRIBUTION_2026-09-21.md) includes older
 row-based Market traffic, isolated compact-frame observations, bootstrap cost,
@@ -88,10 +90,49 @@ D1_PLAYER_STATE_DAILY_WRITE_BUDGET or production max_pending.
   fallback to an actually present valid meta.duration. Invalid primary values
   cannot be hidden by a valid fallback. Multiple results still aggregate.
 
-Full-day Market write/read costs, full-day Player-State cost, safe quota reserve,
+Lane-attributed full-day Market write/read costs, full-day Player-State cost, safe quota reserve,
 peak envelope, approved accumulation/retention period, production max_pending
 and consumer/delivery lifecycle remain open. Closing metadata validation does
 not activate enforcement or outbox, nor establish safe production budgets.
+
+## Current read-only Production evidence — 2026-10-04
+
+The preceding authorized audit confirmed core operational: runtime 0.2.10,
+version 5493217c-ab32-4f44-9fe9-1d738e586b7b at 100% traffic; health/feed HTTP 200,
+overall/Market/Player-State PASS. Latest accepted sweep 5246: 4,364 items,
+5/5 scopes, 10h30 duration, zero candidates/frames after acceptance and 36h
+started_at freshness satisfied. Five recent sweeps show the same completion
+envelope. Last 72h: Market 288/288 PASS, Player-State 3/3 PASS. These are dated
+audit observations, not a new production check performed by this local package.
+
+| Complete UTC day | rows_read | rows_written | read_queries | write_queries |
+| --- | ---: | ---: | ---: | ---: |
+| 2026-10-01 | 537262 | 67865 | 603 | 11632 |
+| 2026-10-02 | 628671 | 65615 | 675 | 11297 |
+| 2026-10-03 | 743840 | 82451 | 756 | 14089 |
+
+Database/account aggregates agree, and minute sums reconcile. Current stored
+accepted evidence arrivals (Market/fundamental): October 1 10955/166,
+October 2 10745/43, October 3 13495/85. Domain event counts are not billable writes
+or a complete burst/payload measurement. Historical unfinished runs/candidate
+remnants were observed but did not block the current accepted sweeps.
+
+Closed: current core operation, repeated sub-12h sweeps, three complete UTC-day
+database costs, Market reliability and stored evidence arrival counts; local
+bounded reserve/terminal envelope and runFinish discrepancy are now calibrated.
+
+Still AUTH_BLOCKED: historical lane/phase attribution, CPU/retry attribution,
+confirmed allowance/quota, independently verified Build-to-Commit association.
+Safe account reserve/allocations still need approval. The previous telemetry
+403/code 10000 was not retried; Build API returned 403/12004 and subscription API
+403/10000 during the read-only audit. No blocked API is retried in this package.
+
+Still DESIGN/VALIDATION: production reservation wiring and full actual-cost
+accounting, bounded recovery/reconciliation policy; outbox max_pending,
+retention/accumulation horizon, consumer and external sender lifecycle. Preview
+max_pending=1000 remains a fixture. An accumulating outbox with no consumer
+remains unacceptable. WRITE_BUDGET_ENFORCEMENT_READY, INTERNAL_OUTBOX_READY and
+EXTERNAL_ALERTING_READY remain NO; no production config/migration/runtime changes.
 ## Preserved boundary and next gate
 
 The [architecture](WRITE_BUDGET_OUTBOX_ARCHITECTURE.md) remains the required
