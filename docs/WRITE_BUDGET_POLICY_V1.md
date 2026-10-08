@@ -105,6 +105,10 @@ Run `node tools/write-budget-policy-simulation.mjs` and focused policy/relevant
 Watcher tests. The simulator rejects class overruns, independent-reserve borrowing,
 recursive/ineligible retry, invalid usage metadata and global/accounting mismatches.
 It makes no network calls and does not apply the policy anywhere.
+Usage and options must be plain objects with known own fields; all five usage
+classes are required. Invalid option types, unknown reserve fields and explicit
+null/nonfinite aggregate usage are rejected. An omitted aggregate is only the
+sum of supplied offline scenario classes, never proof of account billing usage.
 
 - WATCHER_CORE_OPERATIONAL = YES (existing evidence)
 - WRITE_BUDGET_ENFORCEMENT_EVIDENCE = SUFFICIENT_FOR_POLICY_DECISION

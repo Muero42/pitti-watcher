@@ -19,11 +19,20 @@ export function validatePolicy(candidate=policy) {
   return sum;
 }
 
-export function simulate(usage,{candidate=policy,retryPurpose=null,recursiveRetry=false,
-  independentReserveUse=0,totalWrites=null}={}) {
+function plainObject(value) {
+  return value!==null && typeof value==='object' && Object.getPrototypeOf(value)===Object.prototype;
+}
+export function simulate(usage,options={}) {
+  const allowed=['candidate','retryPurpose','recursiveRetry','independentReserveUse','totalWrites'];
+  if(!plainObject(options) || Reflect.ownKeys(options).some(k=>!allowed.includes(k)) ||
+    Object.values(options).some(v=>v===undefined))throw new Error('INVALID_SIMULATION_OPTIONS');
+  if(Object.hasOwn(options,'recursiveRetry')&&typeof options.recursiveRetry!=='boolean')throw new Error('INVALID_RECURSIVE_RETRY');
+  if(Object.hasOwn(options,'retryPurpose')&&typeof options.retryPurpose!=='string')throw new Error('INVALID_RETRY_PURPOSE');
+  if(Object.hasOwn(options,'totalWrites'))count(options.totalWrites,'totalWrites');
+  const {candidate=policy,retryPurpose=null,recursiveRetry=false,independentReserveUse=0}=options;
   validatePolicy(candidate);
-  if(!usage || typeof usage!=='object' || Array.isArray(usage) ||
-    Object.keys(usage).some(k=>!classes.includes(k)))throw new Error('INVALID_ACCOUNTING_CLASS');
+  if(!plainObject(usage) || Reflect.ownKeys(usage).some(k=>!classes.includes(k)) ||
+    classes.some(k=>!Object.hasOwn(usage,k)))throw new Error('INVALID_ACCOUNTING_CLASS');
   const errors=[];
   const writes=Object.fromEntries(classes.map(k=>[k,count(usage[k],k)]));
   for(const k of classes)if(writes[k]>candidate.envelopes[k])errors.push(`${k.toUpperCase()}_CEILING_EXCEEDED`);
@@ -32,7 +41,7 @@ export function simulate(usage,{candidate=policy,retryPurpose=null,recursiveRetr
   if(count(independentReserveUse,'independentReserveUse')!==0)errors.push('INDEPENDENT_RESERVE_NOT_BORROWABLE');
   const accounted=classes.reduce((n,k)=>n+writes[k],0);
   count(accounted,'accountedWrites');
-  const reported=totalWrites===null?accounted:count(totalWrites,'totalWrites');
+  const reported=Object.hasOwn(options,'totalWrites')?options.totalWrites:accounted;
   if(reported!==accounted)errors.push('TOTAL_ACCOUNTING_MISMATCH');
   if(reported>candidate.globalPlanningCeiling)errors.push('GLOBAL_CEILING_EXCEEDED');
   if(reported>candidate.globalPlanningCeiling-candidate.envelopes.independentReserve)errors.push('INDEPENDENT_RESERVE_ENCROACHED');

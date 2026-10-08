@@ -64,3 +64,30 @@ test('no runtime source imports or reads policy artifacts',()=>{
     assert.doesNotMatch(source,/write-budget-policy-v1|write-budget-policy-simulation/,name);
   }
 });
+
+test('malformed options cannot silently default to a passing simulation',()=>{
+  for(const options of [null,false,true,0,1,'bad',[],new Date(),
+    {independentReserve:12000},{unexpected:0},{recursiveRetry:undefined},
+    Object.create({independentReserveUse:12000})]) {
+    assert.throws(()=>simulate(empty(),options),/INVALID_SIMULATION_OPTIONS/);
+  }
+  for(const value of [null,0,1,'false',NaN])
+    assert.throws(()=>simulate(empty(),{recursiveRetry:value}),/INVALID_RECURSIVE_RETRY/);
+  for(const value of [null,1,false,[]])
+    assert.throws(()=>simulate(empty(),{retryPurpose:value}),/INVALID_RETRY_PURPOSE/);
+  for(const value of [null,NaN,Infinity,-1,'0',1.5]){
+    assert.throws(()=>simulate(empty(),{totalWrites:value}),/INVALID_COUNT/);
+    assert.throws(()=>simulate(empty(),{independentReserveUse:value}),/INVALID_COUNT/);
+  }
+  assert.equal(simulate(empty()).fits,true,'omitted total is a derived offline scenario');
+  assert.equal(simulate(empty(),{totalWrites:0,recursiveRetry:false}).fits,true);
+});
+
+test('missing or inherited accounting classes cannot supply invented zero usage',()=>{
+  for(const usage of [null,undefined,[],new Date(),{},Object.create(empty())])
+    assert.throws(()=>simulate(usage),/INVALID_ACCOUNTING_CLASS/);
+  for(const key of Object.keys(empty())){
+    const usage=empty();delete usage[key];
+    assert.throws(()=>simulate(usage),/INVALID_ACCOUNTING_CLASS/);
+  }
+});
