@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "status": "POLICY_CANDIDATE",
+  "active": false,
+  "accountPlan": "UNKNOWN",
+  "ceilingBasis": "HYPOTHETICAL_FREE_PLANNING_ONLY",
+  "window": "UTC_DAY",
+  "globalPlanningCeiling": 100000,
+  "envelopes": {
+    "market": 72000,
+    "playerState": 4000,
+    "unknown": 3000,
+    "bookkeeping": 4000,
+    "retry": 5000,
+    "independentReserve": 12000
+  },
+  "retryPurposes": ["retry", "completion"],
+  "recursiveRetryAllowed": false,
+  "independentReserveBorrowable": false,
+  "outboxReady": false,
+  "externalAlertingReady": false
+}
