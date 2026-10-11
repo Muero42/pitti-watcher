@@ -1,4 +1,5 @@
 import baseWorker from './index.js';
+import {newsFeed} from './news-source.js';
 
 const HOUR=3600_000;
 const VERSION='0.2.7';
@@ -93,7 +94,8 @@ export function acceptedEvidenceSql(limit=250){
            e.source,e.original_source,e.authority,e.confidence,e.thesis_link,e.payload_json,e.observation_run_id
     FROM evidence_events e
     LEFT JOIN watcher_runs r ON r.id=e.observation_run_id
-    WHERE e.observation_run_id IS NULL OR (r.ok=1 AND r.finished_at IS NOT NULL)
+    WHERE (e.observation_run_id IS NULL OR (r.ok=1 AND r.finished_at IS NOT NULL))
+      AND e.fundamental_or_market IN ('market','fundamental')
     ORDER BY e.first_seen_at DESC LIMIT ${bounded}
   `;
 }
@@ -151,7 +153,8 @@ export async function companionFeed(request,env,ctx,version=VERSION,marketLoader
       player_state_latest_accepted:publicRun(playerAccepted),
       player_state_latest_completed_failure:publicRun(playerFailure)
     },
-    league,freeAgency,events,market
+    league,freeAgency,events,market,
+    newsEvidence:await newsFeed(env).catch(()=>({schema:'pitti.news-evidence.v1',status:'FAIL',events:[]}))
   });
 }
 

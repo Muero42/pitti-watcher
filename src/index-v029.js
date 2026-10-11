@@ -1,4 +1,5 @@
 import v027Worker,{acceptedEvidenceSql,companionFeed} from './index-v027.js';
+import {runNews} from './news-source.js';
 import {recordPlayerStateInvocation} from './player-state-invocations.js';
 import {
   beginChunkedPlayerStateSweep,
@@ -66,6 +67,7 @@ export default {
     }
     if(cron===MARKET_CRON){
       ctx.waitUntil(runTrendingFrames(env,Date.now(),'scheduled'));
+      if(env.NEWS_SOURCE_ENABLED==='1')ctx.waitUntil(runNews(env));
       return;
     }
     console.log(JSON.stringify({event:'watcher_cron_ignored',cron}));

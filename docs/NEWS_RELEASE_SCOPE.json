@@ -1,0 +1,1492 @@
+{
+  "schema": "pitti.controlled-news-release-scope.v1",
+  "watcher": {
+    "branch": "codex/watcher-news-release-v1",
+    "parent": "38e4c4ede061644b0e879f408bf6a489a9fe6511",
+    "files": [
+      "src/index.js",
+      "src/index-v027.js",
+      "src/index-v029.js",
+      "src/news-source.js",
+      "test/market-frames.test.js",
+      "test/bounded-market-retention.test.js",
+      "test/news-source.test.js",
+      "tools/news-release-matrix.mjs",
+      "docs/BOUNDED_MARKET_RETENTION.md",
+      "docs/LOCAL_NEWS_SOURCE_BRIDGE.md",
+      "docs/LOCAL_NEWS_BRIDGE_CLOSURE.md",
+      "docs/NEWS_RELEASE_MATRIX.json",
+      "docs/NEWS_RELEASE_SCOPE.json",
+      "docs/CONTROLLED_NEWS_RELEASE_PREPARATION.md"
+    ],
+    "runtimeSource": "9e2e5943bea0e07b91af454f9474547cdbf6679c",
+    "retentionSource": "d11e4018ce47d0931180dd306d9cb1f72d305df3",
+    "excludedAncestorCommits": [
+      "b1d6757ce13b34074db59d7ae1008cb5779e00a2",
+      "629d54ae08eb2f44ffd4e4cd6d289ad3352c5690",
+      "be75a3a98682ba4b07f2b6c3fe59bf572401ff37",
+      "38f1bc2847c9910c83e7cb631c87a922527953d3",
+      "3a4ecd18046ae831b8c12fd6a800bbb30dd89d52",
+      "f62da5029078e70c1d8a07608c8d90899081fe05",
+      "61bd6a477895f844235b97a3f9efb633af6608f1",
+      "c3e3556901ae56680fd8fc8b0edb01340abcf989",
+      "45dc17b6746cfbf5f4d8cf0f4ae6f3bfebc100fe",
+      "7ccdd256f9f588fe72665fa946151f3f0a590941",
+      "ee505a0587342b5e450896de49bda2e2f744b665",
+      "a48e1e1a51dc9cc406b72934817b9cc2a4d6779f"
+    ],
+    "excludedAncestorFiles": [
+      "docs/BLOCKED_RESERVATION_RESOLUTION_CONTRACT.md",
+      "docs/CLOUDFLARE_TIME_COMMIT_EVIDENCE_REVIEW.md",
+      "docs/LOCAL_D1_ADMISSION_PROOF.json",
+      "docs/LOCAL_D1_ADMISSION_PROOF.md",
+      "docs/LOCAL_D1_DURABLE_RECOVERY_PROOF.json",
+      "docs/LOCAL_D1_DURABLE_RECOVERY_PROOF.md",
+      "docs/LOCAL_D1_EVIDENCE_COST_CALIBRATION.json",
+      "docs/LOCAL_D1_EVIDENCE_COST_CALIBRATION.md",
+      "docs/LOCAL_D1_MARKET_PLAN_PROOF.json",
+      "docs/LOCAL_D1_MARKET_PLAN_PROOF.md",
+      "docs/LOCAL_D1_MARKET_SETTLEMENT_PROOF.json",
+      "docs/LOCAL_D1_MARKET_SETTLEMENT_PROOF.md",
+      "docs/LOCAL_D1_UNCERTAIN_WRITE_GUARD.json",
+      "docs/LOCAL_D1_UNCERTAIN_WRITE_GUARD.md",
+      "docs/MARKET_ADMISSION_RETENTION_DESIGN.md",
+      "docs/MARKET_RUNTIME_INTEGRATION_DECISION.md",
+      "docs/RUNTIME_CLOCK_COVERAGE_CONTRACT.md",
+      "docs/TIME_INDEPENDENT_BUDGET_STRATEGY_REVIEW.md",
+      "docs/WRITE_BUDGET_ENFORCEMENT_DESIGN_GATE.md",
+      "test/durable-recovery-adversarial.test.js",
+      "test/local-d1-admission-proof.test.js",
+      "test/local-d1-durable-recovery-proof.test.js",
+      "test/local-d1-market-plan-proof.test.js",
+      "test/local-d1-market-settlement-proof.test.js",
+      "test/market-admission-design.test.js",
+      "test/recovery-integration-blocker.test.js",
+      "test/write-budget-design-gate.test.js",
+      "tools/local-d1-admission-proof.mjs",
+      "tools/local-d1-durable-recovery-proof.mjs",
+      "tools/local-d1-evidence-cost-calibration.mjs",
+      "tools/local-d1-market-plan-proof.mjs",
+      "tools/local-d1-market-settlement-proof.mjs",
+      "tools/market-admission-design.mjs"
+    ],
+    "note": "The standalone retention regression is copied unchanged from d11e401:test/write-budget-design-gate.test.js under a scope-accurate name. Excluded ancestor files remain preserved on original branches, not added to this candidate."
+  },
+  "companion": {
+    "branch": "codex/companion-news-release-rc4234",
+    "head": "670e0745a72e9b1acf38d2151928f0e73f7d1e7b",
+    "tree": "637854eb4dac4f7206387e80ea9c72a859675bea",
+    "parent": "c4ca793288d728f84f92e0319d18e9bb4f1373a0",
+    "main": "f65cfa891ba2cb64999bfa1fc7855bea8024778a",
+    "commits": [
+      "52e441b620cd4c3ca8972f21067e7cd6386b61e5",
+      "0966857e48d3e0267e65c14db8b0b51a1d443306",
+      "c4ca793288d728f84f92e0319d18e9bb4f1373a0",
+      "670e0745a72e9b1acf38d2151928f0e73f7d1e7b"
+    ],
+    "files": [
+      "HANDOFF_COMPLETENESS_MATRIX.md",
+      "NEW_CHAT_HANDOFF_CURRENT.md",
+      "PITTI_AUTO_PREFLIGHT.md",
+      "PITTI_COMMAND_CONTRACTS.json",
+      "PITTI_CURRENT_STATE.json",
+      "PITTI_EXECUTION_LOCK.json",
+      "PITTI_HANDOFF_SEAL.json",
+      "PITTI_NEW_CHAT_BOOTSTRAP.md",
+      "PITTI_PROJECT_STATE.md",
+      "README.md",
+      "app.js",
+      "docs/PITTI_RC4231_ANDROID_HOLD_EVIDENCE_2026-10-10.json",
+      "docs/PITTI_RC4232_LOCAL_VALIDATION.json",
+      "docs/PITTI_RC4232_RENDER_DIAGNOSTIC_CANDIDATE.md",
+      "docs/PITTI_RC4233_NEWS_BRIDGE_LOCAL_REPORT.md",
+      "docs/PITTI_RC4234_BOOTSTRAP_DIAGNOSTIC_REPAIR.md",
+      "docs/PITTI_RC4234_LOCAL_VALIDATION.json",
+      "index.html",
+      "manifest.webmanifest",
+      "sw.js",
+      "tools/fixtures/rc4232/release-binding.json",
+      "tools/fixtures/rc4233/release-binding.json",
+      "tools/fixtures/rc4234/release-binding.json",
+      "tools/pitti_guardrail_check.mjs",
+      "tools/postmerge-authority-contract.mjs",
+      "tools/rc4231-release-baseline.mjs",
+      "tools/rc4232-release-baseline.mjs",
+      "tools/rc4233-news-baseline.mjs",
+      "tools/rc4234-bootstrap-baseline.mjs",
+      "tools/season-bootstrap-diagnostic-binding-regression.mjs",
+      "tools/season-decision-lifecycle-regression.mjs",
+      "tools/season-rc4231-release-binding-regression.mjs",
+      "tools/season-rc4232-release-binding-regression.mjs",
+      "tools/season-render-diagnostic-regression.mjs",
+      "tools/season-watcher-news-binding-regression.mjs",
+      "tools/season-watcher-news-regression.mjs"
+    ],
+    "strict": {
+      "runs": 1,
+      "passed": 336,
+      "total": 336,
+      "rawResultsSha256": "d75d4e8e7e967f5cd5d9ee0d5718a986b375550032449b37dfb8e4dd3505ab36",
+      "checks": [
+        {
+          "name": "tools/release-contract-v2.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/runtime-startup-contract.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/live-presentation-behavior.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-bootstrap-runtime-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-interaction-e2e-gate.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-startup-resilience-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-realshape-startup-e2e.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-expert-phase-policy-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-lineup-waiver-routing-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-waiver-surface-ir-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-automatic-refresh-contract.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-workspace-navigation-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/rc478-oos-policy.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/pitti_guardrail_check.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/rc482-draft-critical.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/rc483-draft-critical.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/rc484-draft-critical.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/rc485-draft-critical.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/rc486-draft-critical.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/rc487-draft-critical.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/rc488-draft-critical.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/rc489-draft-critical.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/rc490-draft-critical.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/rc491-return-calibration.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/rc496-draft-critical.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/rc4146-tier-payload-e2e.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/rc4147-expert-directory-montgomery.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/rc4148-tier-from-v4-panel.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/rc4149-partial-v4-tier.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/rc4150-global-v4-tier.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/rc4151-live-controls-speed.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/rc4152-live-manager-grid.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/rc4153-expert-display-order.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/v4-embedded-coverage.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/v3-v4-same-state-diagnostic.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-decision-engine-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-waiver-trade-v1-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/boone-trade-value-runtime-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/permission-contract-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/takeover-authority-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/postmerge-authority-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-adversarial-review-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/cloud-foundation-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/release-completeness-guard.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/rc4158-expert-delta-refresh.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-fa-ownership-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/week1-waiver-market-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/live-trade-roster-identity-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-bootstrap-render-order-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-mobile-bootstrap-transport-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "Draft_Companion_Position_Path_Regression_2026-08-13.js",
+          "status": "PASS"
+        },
+        {
+          "name": "Draft_Companion_Player_Quality_Expert_Health_Regression_2026-08-13.js",
+          "status": "PASS"
+        },
+        {
+          "name": "Draft_Companion_Return_Geometry_Market_Regression_2026-08-13.js",
+          "status": "PASS"
+        },
+        {
+          "name": "Draft_Companion_Scarcity_Double_Count_Regression_2026-08-13.js",
+          "status": "PASS"
+        },
+        {
+          "name": "Draft_Companion_Alternative_Scarcity_Regression_2026-08-13.js",
+          "status": "PASS"
+        },
+        {
+          "name": "Draft_Companion_Dress_Rehearsal_Regression_2026-08-14.js",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/live-league-state-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/live-trade-manager-faab-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/postmerge-authority-contract.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-boone-production-parity-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-boone-week-discovery-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-bootstrap-diagnostic-binding-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-decision-lifecycle-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-decision-quality-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-dst-k-stream-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-dst-production-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-fp-proxy-resilience-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-game-context-worker-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-lineup-evidence-status-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-lineup-start-sit-v2-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-live-refresh-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-matchup-evidence-layer-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-package-manifest-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-player-directory-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-rank-date-precision-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-ranking-freshness-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-rb-storage-evidence-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-rc4219-adversarial-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-rc4220-adversarial-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-rc4220-trade-model-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-rc4221-search-space-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-rc4222-data-completeness-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-rc4223-eligibility-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-rc4223-persistence-lock-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-rc4223-tottenham-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-rc4224-roster-presentation-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-rc4225-roster-refinement-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-rc4226-adaptive-decision-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-rc4226-runtime-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-rc4226-sources-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-rc4227-acquisition-audit-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-rc4227-normal-acquisition-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-rc4227-release-binding-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-rc4228-release-binding-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-rc4228-route-diagnostic-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-rc4229-release-binding-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-rc4229-shape-diagnostic-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-rc4230-acquisition-contract-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-rc4230-release-binding-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-rc4231-release-binding-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-rc4232-release-binding-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-render-diagnostic-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-residual-interaction-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-retrieval-waiver-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-selected-weekly-acquisition-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-selected-weekly-panel-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-service-worker-cache-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-startsit-weekly-context-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-startup-execution-watchdog-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-trade-boone-source-contract-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-trade-team-needs-v2-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-waiver-team-needs-v3-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-watcher-feed-v2-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-watcher-news-binding-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-watcher-news-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-week-context-timeout-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-week-rollover-e2e.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-weekly-lane-isolation-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-weekly-metadata-quota-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-weekly-persisted-snapshot-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-weekly-projection-diagnostic-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-weekly-rank-retry-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/season-weekly-retry-partial-ui-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/week1-dst-current-baseline-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "season-parallel-contract-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/emergency-queue-contract.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "Draft_Companion_IR_Stash_And_Fetch_Regression_2026-08-13.js",
+          "status": "PASS"
+        },
+        {
+          "name": "tools/weekly-evidence-v2-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "backup self-test",
+          "status": "PASS"
+        },
+        {
+          "name": "cloud foundation regression",
+          "status": "PASS"
+        },
+        {
+          "name": "cloud security regression",
+          "status": "PASS"
+        },
+        {
+          "name": "cloud workflow contract",
+          "status": "PASS"
+        },
+        {
+          "name": "--check app.js",
+          "status": "PASS"
+        },
+        {
+          "name": "--check decision-policy.js",
+          "status": "PASS"
+        },
+        {
+          "name": "--check Draft_Companion_Alternative_Scarcity_Regression_2026-08-13.js",
+          "status": "PASS"
+        },
+        {
+          "name": "--check Draft_Companion_Dress_Rehearsal_Regression_2026-08-14.js",
+          "status": "PASS"
+        },
+        {
+          "name": "--check Draft_Companion_IR_Stash_And_Fetch_Regression_2026-08-13.js",
+          "status": "PASS"
+        },
+        {
+          "name": "--check Draft_Companion_Player_Quality_Expert_Health_Regression_2026-08-13.js",
+          "status": "PASS"
+        },
+        {
+          "name": "--check Draft_Companion_Position_Path_Regression_2026-08-13.js",
+          "status": "PASS"
+        },
+        {
+          "name": "--check Draft_Companion_Return_Geometry_Market_Regression_2026-08-13.js",
+          "status": "PASS"
+        },
+        {
+          "name": "--check Draft_Companion_Scarcity_Double_Count_Regression_2026-08-13.js",
+          "status": "PASS"
+        },
+        {
+          "name": "--check dst-k-season-stream.js",
+          "status": "PASS"
+        },
+        {
+          "name": "--check expert-board-export.js",
+          "status": "PASS"
+        },
+        {
+          "name": "--check expert-v2-board.js",
+          "status": "PASS"
+        },
+        {
+          "name": "--check expert-v3-board.js",
+          "status": "PASS"
+        },
+        {
+          "name": "--check game-context-v1.js",
+          "status": "PASS"
+        },
+        {
+          "name": "--check lineup-start-sit-v2.js",
+          "status": "PASS"
+        },
+        {
+          "name": "--check live-surface-v3.js",
+          "status": "PASS"
+        },
+        {
+          "name": "--check live-surface.js",
+          "status": "PASS"
+        },
+        {
+          "name": "--check RC4_41_RESEARCH_CACHE_QUOTA_REGRESSION.js",
+          "status": "PASS"
+        },
+        {
+          "name": "--check RC4_42_RANKING_STORAGE_QUOTA_REGRESSION.js",
+          "status": "PASS"
+        },
+        {
+          "name": "--check RC4_61_LIVE_SURFACE_REGRESSION.js",
+          "status": "PASS"
+        },
+        {
+          "name": "--check season-evidence-layer.js",
+          "status": "PASS"
+        },
+        {
+          "name": "--check sw.js",
+          "status": "PASS"
+        },
+        {
+          "name": "--check trade-team-needs-v2.js",
+          "status": "PASS"
+        },
+        {
+          "name": "--check weekly-evidence-v2.js",
+          "status": "PASS"
+        },
+        {
+          "name": "--check _worker.js",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/analyze-current-decision-evidence.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/analyze-decision-evidence.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/apply-rc461-live-surface-v3.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/apply-rc462-decision-ui.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/audit-v45-backup.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/boone-trade-value-live-audit.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/boone-trade-value-runtime-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/cloud-apt-bootstrap.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/cloud-contract.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/cloud-foundation-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/cloud-install-contract.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/cloud-isolated-validation.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/cloud-run.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/cloud-security-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/cloud-validate.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/cloud-workflow-check.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/emergency-queue-contract.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/handoff-seal-reseal.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/live-league-state-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/live-presentation-behavior.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/live-trade-manager-faab-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/live-trade-roster-identity-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/package-reextract.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/permission-contract-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/pitti_guardrail_check.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/postmerge-authority-contract.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/postmerge-authority-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/pre-draft-freshness-gate.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc4100-turn-portfolio.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc4104-roster-portfolio.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc4106-embedded-individuals.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc4111-storage-quota.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc4112-mariano-source.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc4113-configured-expert-identity.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc4114-positional-expert-aggregation.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc4115-v5-hybrid.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc4117-release-critical.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc4122-v45-runtime-contract.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc4127-expert-membership-contract.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc4130-active-fixture-quota.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc4143-tier-position-contract.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc4144-tier-render-independence.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc4145-tier-known-id-e2e.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc4146-tier-payload-e2e.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc4147-expert-directory-montgomery.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc4148-tier-from-v4-panel.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc4149-partial-v4-tier.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc4150-global-v4-tier.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc4151-live-controls-speed.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc4152-live-manager-grid.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc4153-expert-display-order.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc4158-expert-delta-refresh.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc4182-hydration-rootcause.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc4224-authority.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc4225-authority.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc4226-authority.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc4227-authority.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc4228-authority.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc4228-diagnostic-baseline.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc4229-authority.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc4229-diagnostic-baseline.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc4229-release-baseline.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc4230-authority.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc4230-diagnostic-baseline.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc4230-postmerge-authority.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc4230-release-baseline.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc4231-release-baseline.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc4232-release-baseline.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc4233-news-baseline.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc4234-bootstrap-baseline.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc478-oos-policy.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc482-draft-critical.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc483-draft-critical.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc484-draft-critical.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc485-draft-critical.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc486-draft-critical.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc487-draft-critical.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc488-draft-critical.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc489-draft-critical.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc490-draft-critical.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc491-return-calibration.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc496-draft-critical.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc497-microfix.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc498-evidence-polarity.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc499-normal-cut.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/rc499-wr-saturation.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/release-completeness-guard.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/release-contract-v2.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/runtime-files.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/runtime-startup-contract.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-adversarial-review-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-automatic-refresh-contract.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-boone-production-parity-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-boone-week-discovery-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-bootstrap-diagnostic-binding-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-bootstrap-render-order-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-bootstrap-runtime-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-browser-review.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-decision-engine-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-decision-lifecycle-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-decision-quality-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-dst-k-stream-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-dst-production-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-expert-phase-policy-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-fa-ownership-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-fp-proxy-resilience-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-game-context-worker-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-interaction-e2e-gate.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-lineup-evidence-status-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-lineup-start-sit-v2-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-lineup-waiver-routing-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-live-refresh-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-matchup-evidence-layer-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-mobile-bootstrap-transport-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-package-manifest-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-player-directory-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-rank-date-precision-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-ranking-freshness-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-rb-storage-evidence-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-rc4219-adversarial-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-rc4220-adversarial-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-rc4220-trade-model-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-rc4221-search-space-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-rc4222-data-completeness-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-rc4223-eligibility-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-rc4223-persistence-lock-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-rc4223-tottenham-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-rc4224-roster-presentation-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-rc4225-roster-refinement-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-rc4226-adaptive-decision-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-rc4226-runtime-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-rc4226-sources-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-rc4227-acquisition-audit-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-rc4227-normal-acquisition-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-rc4227-release-binding-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-rc4228-release-binding-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-rc4228-route-diagnostic-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-rc4229-release-binding-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-rc4229-shape-diagnostic-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-rc4230-acquisition-contract-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-rc4230-release-binding-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-rc4231-release-binding-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-rc4232-release-binding-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-realshape-startup-e2e.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-render-diagnostic-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-residual-interaction-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-retrieval-waiver-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-selected-weekly-acquisition-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-selected-weekly-panel-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-service-worker-cache-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-startsit-weekly-context-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-startup-execution-watchdog-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-startup-resilience-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-trade-boone-source-contract-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-trade-team-needs-v2-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-waiver-surface-ir-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-waiver-team-needs-v3-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-waiver-trade-v1-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-watcher-feed-v2-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-watcher-news-binding-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-watcher-news-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-week-context-timeout-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-week-rollover-e2e.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-weekly-lane-isolation-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-weekly-metadata-quota-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-weekly-persisted-snapshot-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-weekly-projection-diagnostic-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-weekly-rank-retry-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-weekly-retry-partial-ui-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/season-workspace-navigation-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/stage-pages-runtime.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/strict-suite.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/takeover-authority-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/takeover-authority.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/v3-v4-same-state-diagnostic.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/v4-embedded-coverage.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/week1-dst-current-baseline-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/week1-waiver-market-regression.mjs",
+          "status": "PASS"
+        },
+        {
+          "name": "--check tools/weekly-evidence-v2-regression.mjs",
+          "status": "PASS"
+        }
+      ]
+    }
+  },
+  "rollback": {
+    "policy": "Only reviewed News-protecting Companion versions after activation or whenever cached News may exist.",
+    "minimumReviewedCommit": "c4ca793288d728f84f92e0319d18e9bb4f1373a0",
+    "forbidden": "f65cfa891ba2cb64999bfa1fc7855bea8024778a",
+    "historyDeletion": false
+  },
+  "publication": {
+    "authorized": false,
+    "order": [
+      "Companion",
+      "Watcher with News disabled"
+    ],
+    "activationAuthorized": false
+  }
+}

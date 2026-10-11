@@ -747,7 +747,12 @@ async function processTrendingFrameRun(env, at, runId) {
   if (previousFrame.captured_at !== null) {
     await runPhase(env, 'market', 'retention.prune', context, () => env.DB.prepare(`
       DELETE FROM trending_snapshot_frames
-      WHERE captured_at < ?1
+      WHERE captured_at IN (
+        SELECT f.captured_at FROM trending_snapshot_frames f
+        JOIN watcher_runs r ON r.id=f.run_id
+        WHERE f.captured_at < ?1 AND r.finished_at IS NOT NULL
+        ORDER BY f.captured_at LIMIT 64
+      )
     `).bind(previousFrame.captured_at).run());
   }
   return { ok: true, captured_at: at, players: rows.length, transitions: plan.events.length };
