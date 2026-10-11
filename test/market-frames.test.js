@@ -49,7 +49,7 @@ function fixture(t){
             frames.sort((a,b)=>a.captured_at-b.captured_at);calls.frameInserts++;return success();
           }
           if(sql.startsWith('DELETE FROM trending_snapshot_frames')){
-            const candidates=frames.filter(row=>row.captured_at<args[0]);
+            const candidates=frames.filter(row=>row.captured_at<args[0]&&runs.find(run=>run.id===row.run_id)?.finished_at!=null).slice(0,64);
             for(const stale of candidates)frames.splice(frames.indexOf(stale),1);
             if(candidates.length)calls.framePrunes++;
             return success(candidates.length);
