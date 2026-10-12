@@ -1,13 +1,18 @@
 // One bounded public source. Opt-in locally; no claim of exhaustive news coverage.
 export const NEWS_URL='https://site.api.espn.com/apis/site/v2/sports/football/nfl/news?limit=50';
 const DAY=86400000;
-const nameKey=s=>String(s||'').normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/\b(jr|sr|ii|iii|iv)\b\.?/g,'').replace(/[^a-z0-9]+/g,' ').trim();
+const nameKey=s=>(typeof s==='string'?s:'').normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/\b(jr|sr|ii|iii|iv)\b\.?/g,'').replace(/[^a-z0-9]+/g,' ').trim();
+const record=x=>x!==null&&typeof x==='object'&&!Array.isArray(x);
+const validId=x=>(typeof x==='string'&&/^\d{1,32}$/.test(x))||(Number.isSafeInteger(x)&&x>=0);
+const optionalDescription=x=>x==null||(typeof x==='string'&&x.length<=300);
+const validCategory=c=>record(c)&&typeof c.type==='string'&&c.type.length<=80&&
+  optionalDescription(c.description)&&(c.athlete==null||(record(c.athlete)&&optionalDescription(c.athlete.description)));
 const relevant=/\b(trade|trades|trading|rumor|rumors|injury|injured|inactive|out|questionable|doubtful|practice|practicing|return|returns|starter|starting|benched|bench|role|waived|released|signs|signed|suspended|suspension)\b/i;
 const safeTime=s=>typeof s==='string'&&/(Z|[+-]\d\d:\d\d)$/.test(s)?Date.parse(s):NaN;
 async function hash(s){return [...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s)))].map(x=>x.toString(16).padStart(2,'0')).join('');}
 
 export function articleUrl(raw,id){
-  if(typeof raw!=='string'||raw!==raw.trim()||/[\\\s]/.test(raw))throw Error('NEWS_URL_INVALID');
+  if(!validId(id)||typeof raw!=='string'||raw!==raw.trim()||/[\\\s]/.test(raw))throw Error('NEWS_URL_INVALID');
   const url=new URL(raw);
   // Only observed ESPN article routes from the fixed NFL feed may upgrade.
   if(!['http:','https:'].includes(url.protocol)||url.hostname!=='www.espn.com'||url.port||url.username||url.password||!/^\d+$/.test(String(id)))throw Error('NEWS_URL_INVALID');
@@ -30,21 +35,31 @@ export async function newsPlayerDirectory(db,at){
      run.item_count!==run.seen_count||run.item_count<=0)throw Error('NEWS_PLAYER_SNAPSHOT_UNAVAILABLE');
   const rows=(await db.prepare(`SELECT source_scope,captured_at,source_etag,player_count,frame_json
     FROM player_state_scope_frames WHERE run_id=? ORDER BY source_scope`).bind(run.id).all()).results;
-  const scopes=new Set(['QB','RB','WR','TE','K']),ids=new Set(),players=[];
+  const scopes=new Set(['QB','RB','WR','TE','K']),identities=new Map();let observations=0;
   if(rows?.length!==5)throw Error('NEWS_PLAYER_SNAPSHOT_INCOMPLETE');
   for(const row of rows){
     if(!scopes.delete(row.source_scope)||!row.source_etag||!Number.isSafeInteger(row.captured_at)||!Number.isSafeInteger(row.player_count)||row.player_count<0||row.captured_at<run.started_at||row.captured_at>run.finished_at||
        typeof row.frame_json!=='string'||new TextEncoder().encode(row.frame_json).length>1500000)throw Error('NEWS_PLAYER_SNAPSHOT_INVALID');
     const entries=JSON.parse(row.frame_json);
     if(!Array.isArray(entries)||entries.length!==row.player_count)throw Error('NEWS_PLAYER_SNAPSHOT_INVALID');
+    const frameIds=new Set();
     for(const entry of entries){
-      if(!Array.isArray(entry)||entry.length!==2||typeof entry[0]!=='string'||!entry[0]||ids.has(entry[0])||
-         entry[1]?.position!==row.source_scope||typeof entry[1]?.full_name!=='string'||!nameKey(entry[1].full_name))throw Error('NEWS_PLAYER_SNAPSHOT_INVALID');
-      ids.add(entry[0]);players.push({player_id:entry[0],full_name:entry[1].full_name});
+      if(!Array.isArray(entry)||entry.length!==2||typeof entry[0]!=='string'||!entry[0]||frameIds.has(entry[0])||
+         !record(entry[1])||typeof entry[1].position!=='string'||!entry[1].position||typeof entry[1].full_name!=='string'||!nameKey(entry[1].full_name))throw Error('NEWS_PLAYER_SNAPSHOT_INVALID');
+      // A scope is the requested source filter, not a partition of canonical IDs
+      // or an assertion about the player's own position. The producer counts
+      // every observation but upserts candidates on (run_id,player_id).
+      const state=entry[1],fields=['full_name','team','position','injury_status','practice_participation','depth_chart_order','status'];
+      if(fields.some(k=>state[k]!=null&&(k==='depth_chart_order'?!Number.isFinite(state[k]):typeof state[k]!=='string')))throw Error('NEWS_PLAYER_SNAPSHOT_INVALID');
+      const signature=JSON.stringify(fields.map(k=>state[k]??null));
+      const prior=identities.get(entry[0]);
+      if(prior&&prior.signature!==signature)throw Error('NEWS_PLAYER_SNAPSHOT_CONFLICT');
+      if(!prior)identities.set(entry[0],{signature,player:{player_id:entry[0],full_name:state.full_name}});
+      frameIds.add(entry[0]);observations++;
     }
   }
-  if(players.length!==run.item_count)throw Error('NEWS_PLAYER_SNAPSHOT_INCOMPLETE');
-  return {runId:run.id,players};
+  if(observations!==run.item_count)throw Error('NEWS_PLAYER_SNAPSHOT_INCOMPLETE');
+  return {runId:run.id,players:[...identities].sort(([a],[b])=>a<b?-1:a>b?1:0).map(([,x])=>x.player)};
 }
 
 // Preserve 30 days of News evidence and 90 days of completed News run audit.
@@ -74,15 +89,16 @@ export async function normalizeNews(document,players,at){
   if(!Number.isSafeInteger(at)||at<=0||!Array.isArray(document?.articles)||document.articles.length>100)throw Error('NEWS_SCHEMA_INVALID');
   const names=new Map();
   for(const p of players){
-    if(!p.player_id||!p.full_name)continue;
+    if(!p?.player_id||typeof p.full_name!=='string')continue;
     const key=nameKey(p.full_name),ids=names.get(key)||new Set();ids.add(String(p.player_id));names.set(key,ids);
   }
   const events=new Map();let rejected=0,unmatched=0;
   for(const a of document.articles){
+    if(!record(a)||!validId(a.id)||typeof a.headline!=='string'||!a.headline.trim()||a.headline.length>300||
+       (a.categories!==undefined&&(!Array.isArray(a.categories)||a.categories.length>100||!a.categories.every(validCategory)))){rejected++;continue;}
     const published=safeTime(a?.published),updated=a?.lastModified==null?published:safeTime(a.lastModified);
     let url;try{url=articleUrl(a?.links?.web?.href,a?.id);}catch{rejected++;continue;}
-    if(!/^[0-9]+$/.test(String(a.id))||typeof a.headline!=='string'||!a.headline.trim()||a.headline.length>300||
-       !Number.isFinite(published)||!Number.isFinite(updated)||published>at||updated>at||updated<published){rejected++;continue;}
+    if(!Number.isFinite(published)||!Number.isFinite(updated)||published>at||updated>at||updated<published){rejected++;continue;}
     if(at-published>2*DAY)continue;
     if(!relevant.test(a.headline)||/\b(betting|best bets|odds|predictions)\b/i.test(a.headline))continue;
     // Require a full player name in the headline AND an athlete tag; no surname guessing.
