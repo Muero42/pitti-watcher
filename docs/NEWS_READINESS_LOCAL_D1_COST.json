@@ -1,0 +1,110 @@
+{
+  "schema": "pitti.news-readiness-cost.v1",
+  "runtime": "real disposable local D1/workerd",
+  "observedAt": "2026-10-12T06:21:55.867Z",
+  "sourceFixtureAt": "2026-10-12T06:13:06.159Z",
+  "measurements": [
+    {
+      "name": "accepted-directory",
+      "statements": 2,
+      "rows_read": 8,
+      "rows_written": 0,
+      "changes": 0
+    },
+    {
+      "name": "insert-with-invalid-neighbour",
+      "statements": 7,
+      "rows_read": 19,
+      "rows_written": 12,
+      "changes": 3
+    },
+    {
+      "name": "identical-replay",
+      "statements": 7,
+      "rows_read": 19,
+      "rows_written": 6,
+      "changes": 2
+    },
+    {
+      "name": "retention-pass-1",
+      "statements": 2,
+      "rows_read": 325,
+      "rows_written": 64,
+      "changes": 64
+    },
+    {
+      "name": "retention-pass-2",
+      "statements": 2,
+      "rows_read": 325,
+      "rows_written": 64,
+      "changes": 64
+    },
+    {
+      "name": "retention-pass-3",
+      "statements": 2,
+      "rows_read": 18,
+      "rows_written": 2,
+      "changes": 2
+    },
+    {
+      "name": "retention-idempotent",
+      "statements": 2,
+      "rows_read": 9,
+      "rows_written": 0,
+      "changes": 0
+    },
+    {
+      "name": "ledger-retention",
+      "statements": 2,
+      "rows_read": 322,
+      "rows_written": 63,
+      "changes": 63
+    },
+    {
+      "name": "source-failure-with-retention",
+      "statements": 4,
+      "rows_read": 46,
+      "rows_written": 12,
+      "changes": 9
+    },
+    {
+      "name": "unchanged-player-promotion",
+      "statements": 7,
+      "rows_read": 37,
+      "rows_written": 7,
+      "changes": 7
+    },
+    {
+      "name": "accepted-directory-repeat",
+      "statements": 2,
+      "rows_read": 7,
+      "rows_written": 0,
+      "changes": 0
+    },
+    {
+      "name": "directory-4364-players",
+      "statements": 2,
+      "rows_read": 7,
+      "rows_written": 0,
+      "changes": 0
+    }
+  ],
+  "coverage": {
+    "unchangedPlayerFixture": {
+      "oldLastSeenFilter": 0,
+      "acceptedSnapshot": 1
+    },
+    "largeSyntheticSnapshot": 4364,
+    "realFeedWithSingleVerifiedFixturePlayer": {
+      "articles": 50,
+      "rejected": 1,
+      "matchedEvents": 2
+    }
+  },
+  "limits": [
+    "Local D1 metadata, not Production billing.",
+    "Directory cases contain one or 4364 synthetic players in five retained scope rows.",
+    "Fixture coverage is not a new Production coverage measurement.",
+    "No daily savings or quota guarantee."
+  ]
+}

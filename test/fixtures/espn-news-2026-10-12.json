@@ -1,0 +1,1134 @@
+{
+  "source": "https://site.api.espn.com/apis/site/v2/sports/football/nfl/news?limit=50",
+  "capturedAt": "2026-10-12T06:13:06.159Z",
+  "articles": [
+    {
+      "id": 50164378,
+      "headline": "QB Tyler Huntley leads Ravens to comeback OT win vs. Falcons",
+      "published": "2026-10-12T06:07:32Z",
+      "lastModified": "2026-10-12T06:07:32Z",
+      "links": {
+        "web": {
+          "href": "https://www.espn.com/nfl/story/_/id/50164378/backup-qb-tyler-huntley-leads-ravens-comeback-ot-win-vs-falcons"
+        }
+      },
+      "categories": [
+        {
+          "type": "athlete",
+          "description": "Tyler Huntley"
+        },
+        {
+          "type": "athlete",
+          "description": "Lamar Jackson"
+        }
+      ]
+    },
+    {
+      "id": 50164195,
+      "headline": "Falcons' Michael Penix Jr. injures rib late in loss to Ravens",
+      "published": "2026-10-12T06:05:59Z",
+      "lastModified": "2026-10-12T06:05:59Z",
+      "links": {
+        "web": {
+          "href": "https://www.espn.com/nfl/story/_/id/50164195/falcons-michael-penix-jr-injures-rib-late-loss-ravens"
+        }
+      },
+      "categories": [
+        {
+          "type": "athlete",
+          "description": "Michael Penix Jr"
+        }
+      ]
+    },
+    {
+      "id": 50127290,
+      "headline": "NFL Week 5: Big takeaways, questions and fantasy spin from Sunday's games",
+      "published": "2026-10-12T04:30:53Z",
+      "lastModified": "2026-10-12T04:30:53Z",
+      "links": {
+        "web": {
+          "href": "https://www.espn.com/nfl/story/_/id/50127290/week-5-sunday-games-takeaways-questions-2026"
+        }
+      },
+      "categories": []
+    },
+    {
+      "id": 50163856,
+      "headline": "Huntley leads late TD drive to force OT and then scores on 1-yard run as Ravens beat Falcons 30-23",
+      "published": "2026-10-12T04:55:27Z",
+      "lastModified": "2026-10-12T04:55:27Z",
+      "links": {
+        "web": {
+          "href": "http://www.espn.com/nfl/recap?gameId=401872993"
+        }
+      },
+      "categories": []
+    },
+    {
+      "id": 50163825,
+      "headline": "Ravens storm back, defeat Falcons 30-23 in OT",
+      "published": "2026-10-12T03:58:07Z",
+      "lastModified": "2026-10-12T03:58:07Z",
+      "links": {
+        "web": {
+          "href": "https://www.espn.com/video/clip/_/id/50163825/ravens-storm-back-defeat-falcons-30-23-ot"
+        }
+      },
+      "categories": [
+        {
+          "type": "athlete",
+          "description": "Kyle Hamilton"
+        },
+        {
+          "type": "athlete",
+          "description": "Devontez Walker"
+        },
+        {
+          "type": "athlete",
+          "description": "Michael Penix Jr"
+        },
+        {
+          "type": "athlete",
+          "description": "Derrick Henry"
+        },
+        {
+          "type": "athlete",
+          "description": "Tyler Huntley"
+        }
+      ]
+    },
+    {
+      "id": 50163672,
+      "headline": "Mike Evans stars in 49ers' win: 'Exactly why he's here'",
+      "published": "2026-10-12T04:00:23Z",
+      "lastModified": "2026-10-12T04:00:23Z",
+      "links": {
+        "web": {
+          "href": "https://www.espn.com/nfl/story/_/id/50163672/mike-evans-stars-49ers-win-exactly-why-here"
+        }
+      },
+      "categories": [
+        {
+          "type": "athlete",
+          "description": "Mike Evans"
+        }
+      ]
+    },
+    {
+      "id": 50163399,
+      "headline": "Lions RB Gibbs passes Sanders for most NFL TDs before age 25",
+      "published": "2026-10-12T02:53:25Z",
+      "lastModified": "2026-10-12T02:53:25Z",
+      "links": {
+        "web": {
+          "href": "https://www.espn.com/nfl/story/_/id/50163399/lions-rb-gibbs-passes-sanders-most-nfl-tds-age-25"
+        }
+      },
+      "categories": [
+        {
+          "type": "athlete",
+          "description": "Jahmyr Gibbs"
+        }
+      ]
+    },
+    {
+      "id": 50163352,
+      "headline": "Chargers' Harbaugh laments momentum-swinging 4th-down call",
+      "published": "2026-10-12T02:51:19Z",
+      "lastModified": "2026-10-12T02:51:19Z",
+      "links": {
+        "web": {
+          "href": "https://www.espn.com/nfl/story/_/id/50163352/chargers-harbaugh-laments-momentum-swinging-4th-call"
+        }
+      },
+      "categories": []
+    },
+    {
+      "id": 50163298,
+      "headline": "What is Tyler Warren's ceiling in fantasy after Week 5?",
+      "published": "2026-10-12T02:01:40Z",
+      "lastModified": "2026-10-12T02:01:40Z",
+      "links": {
+        "web": {
+          "href": "https://www.espn.com/video/clip/_/id/50163298/what-tyler-warren-ceiling-fantasy-week-5"
+        }
+      },
+      "categories": [
+        {
+          "type": "athlete",
+          "description": "Tyler Warren"
+        }
+      ]
+    },
+    {
+      "id": 50163287,
+      "headline": "Broncos beat Chargers in Sean Payton's return to playcalling",
+      "published": "2026-10-12T02:36:12Z",
+      "lastModified": "2026-10-12T02:36:12Z",
+      "links": {
+        "web": {
+          "href": "https://www.espn.com/nfl/story/_/id/50163287/broncos-beat-chargers-sean-payton-return-playcalling"
+        }
+      },
+      "categories": [
+        {
+          "type": "athlete",
+          "description": "Bo Nix"
+        }
+      ]
+    },
+    {
+      "id": 50163209,
+      "headline": "Why Aaron Rodgers is a viable fantasy option in Week 6 vs. the Bucs",
+      "published": "2026-10-12T01:38:51Z",
+      "lastModified": "2026-10-12T01:38:51Z",
+      "links": {
+        "web": {
+          "href": "https://www.espn.com/video/clip/_/id/50163209/why-aaron-rodgers-viable-fantasy-option-week-6-vs-bucs"
+        }
+      },
+      "categories": [
+        {
+          "type": "athlete",
+          "description": "Aaron Rodgers"
+        }
+      ]
+    },
+    {
+      "id": 49466506,
+      "headline": "Betting buzz: Who wants to win the NFC East?",
+      "published": "2026-10-12T01:56:15Z",
+      "lastModified": "2026-10-12T01:56:15Z",
+      "links": {
+        "web": {
+          "href": "https://www.espn.com/espn/betting/story/_/id/49466506/nfl-betting-buzz-odds-updates-line-moves-spreads"
+        }
+      },
+      "categories": []
+    },
+    {
+      "id": 50156554,
+      "headline": "Week 5 NFL highlights: Best plays, moments, touchdowns, more",
+      "published": "2026-10-12T00:54:11Z",
+      "lastModified": "2026-10-12T00:54:11Z",
+      "links": {
+        "web": {
+          "href": "https://www.espn.com/nfl/story/_/id/50156554/week-5-highlights-best-plays-touchdowns-2026"
+        }
+      },
+      "categories": []
+    },
+    {
+      "id": 50162466,
+      "headline": "Texans' win over Titans might have broken Terrible Towel curse",
+      "published": "2026-10-12T00:33:51Z",
+      "lastModified": "2026-10-12T00:33:51Z",
+      "links": {
+        "web": {
+          "href": "https://www.espn.com/nfl/story/_/id/50162466/texans-break-steelers-terrible-towel-curse"
+        }
+      },
+      "categories": []
+    },
+    {
+      "id": 50162505,
+      "headline": "49ers move to 5-0 after thrilling win over the Seahawks",
+      "published": "2026-10-12T00:10:15Z",
+      "lastModified": "2026-10-12T00:10:15Z",
+      "links": {
+        "web": {
+          "href": "https://www.espn.com/video/clip/_/id/50162505/49ers-move-5-0-thrilling-win-seahawks"
+        }
+      },
+      "categories": [
+        {
+          "type": "athlete",
+          "description": "Jaxon Smith-Njigba"
+        },
+        {
+          "type": "athlete",
+          "description": "Eddy Pineiro"
+        },
+        {
+          "type": "athlete",
+          "description": "Gracen Halton"
+        },
+        {
+          "type": "athlete",
+          "description": "Malik Mustapha"
+        },
+        {
+          "type": "athlete",
+          "description": "Christian McCaffrey"
+        },
+        {
+          "type": "athlete",
+          "description": "Brandin Cooks"
+        }
+      ]
+    },
+    {
+      "id": 50158281,
+      "headline": "Judging overreactions to NFL Week 5: Time for Titans to look for another QB?",
+      "published": "2026-10-12T02:04:57Z",
+      "lastModified": "2026-10-12T02:04:57Z",
+      "links": {
+        "web": {
+          "href": "https://www.espn.com/nfl/story/_/id/50158281/week-5-overreactions-2026-graziano-nfc-east-ward-jaguars"
+        }
+      },
+      "categories": [
+        {
+          "type": "athlete",
+          "description": "Jayden Daniels"
+        },
+        {
+          "type": "athlete",
+          "description": "Daniel Jones"
+        },
+        {
+          "type": "athlete",
+          "description": "Isaiah Likely"
+        },
+        {
+          "type": "athlete",
+          "description": "Parker Washington"
+        },
+        {
+          "type": "athlete",
+          "description": "DeMario Douglas"
+        }
+      ]
+    },
+    {
+      "id": 50160964,
+      "headline": "Week 5 winners and losers: Maye, Warren, Gibbs dominate; Taylor, Brown struggle",
+      "published": "2026-10-12T00:30:32Z",
+      "lastModified": "2026-10-12T00:30:32Z",
+      "links": {
+        "web": {
+          "href": "https://www.espn.com/fantasy/football/story/_/page/FFSundayHighLows-50160964/nfl-week-5-fantasy-football-winners-losers-injuries-rankings-more"
+        }
+      },
+      "categories": [
+        {
+          "type": "athlete",
+          "description": "Kenyon Sadiq"
+        },
+        {
+          "type": "athlete",
+          "description": "KC Concepcion"
+        },
+        {
+          "type": "athlete",
+          "description": "TJ Hockenson"
+        },
+        {
+          "type": "athlete",
+          "description": "Will Shipley"
+        },
+        {
+          "type": "athlete",
+          "description": "David Montgomery"
+        },
+        {
+          "type": "athlete",
+          "description": "Tyler Shough"
+        },
+        {
+          "type": "athlete",
+          "description": "Chris Olave"
+        },
+        {
+          "type": "athlete",
+          "description": "Rome Odunze"
+        },
+        {
+          "type": "athlete",
+          "description": "Colston Loveland"
+        },
+        {
+          "type": "athlete",
+          "description": "Ashton Jeanty"
+        },
+        {
+          "type": "athlete",
+          "description": "Chase Brown"
+        },
+        {
+          "type": "athlete",
+          "description": "Jonathan Taylor"
+        },
+        {
+          "type": "athlete",
+          "description": "Garrett Wilson"
+        },
+        {
+          "type": "athlete",
+          "description": "Jayden Daniels"
+        },
+        {
+          "type": "athlete",
+          "description": "Brock Bowers"
+        },
+        {
+          "type": "athlete",
+          "description": "Parker Washington"
+        },
+        {
+          "type": "athlete",
+          "description": "Malik Nabers"
+        },
+        {
+          "type": "athlete",
+          "description": "Jordan Love"
+        },
+        {
+          "type": "athlete",
+          "description": "Isaiah Likely"
+        },
+        {
+          "type": "athlete",
+          "description": "Christian Watson"
+        },
+        {
+          "type": "athlete",
+          "description": "Drake Maye"
+        },
+        {
+          "type": "athlete",
+          "description": "Jaylen Warren"
+        },
+        {
+          "type": "athlete",
+          "description": "Jared Goff"
+        },
+        {
+          "type": "athlete",
+          "description": "Jahmyr Gibbs"
+        },
+        {
+          "type": "athlete",
+          "description": "Mike Evans"
+        },
+        {
+          "type": "athlete",
+          "description": "Amon-Ra St Brown"
+        },
+        {
+          "type": "athlete",
+          "description": "Jeremiyah Love"
+        }
+      ]
+    },
+    {
+      "id": 50162416,
+      "headline": "Drake Maye, Pats offense explodes in Week 5",
+      "published": "2026-10-12T00:04:38Z",
+      "lastModified": "2026-10-12T00:04:38Z",
+      "links": {
+        "web": {
+          "href": "https://www.espn.com/video/clip/_/id/50162416/drake-maye-pats-offense-explodes-week-5"
+        }
+      },
+      "categories": []
+    },
+    {
+      "id": 50162384,
+      "headline": "Detroit Lions vs. Arizona Cardinals: Game Highlights",
+      "published": "2026-10-12T00:29:52Z",
+      "lastModified": "2026-10-12T00:29:52Z",
+      "links": {
+        "web": {
+          "href": "https://www.espn.com/video/clip/_/id/50162384/game-highlights"
+        }
+      },
+      "categories": [
+        {
+          "type": "athlete",
+          "description": "Jahmyr Gibbs"
+        },
+        {
+          "type": "athlete",
+          "description": "Jared Goff"
+        }
+      ]
+    },
+    {
+      "id": 50162377,
+      "headline": "Brock Purdy leads 2 late scoring drives to deliver a 32-29 win for the 49ers over the Seahawks",
+      "published": "2026-10-12T01:46:27Z",
+      "lastModified": "2026-10-12T01:46:27Z",
+      "links": {
+        "web": {
+          "href": "http://www.espn.com/nfl/recap?gameId=401872992"
+        }
+      },
+      "categories": []
+    },
+    {
+      "id": 50161673,
+      "headline": "NFL Week 5 trolls: Jets social media jab at Browns leads the way",
+      "published": "2026-10-11T23:51:50Z",
+      "lastModified": "2026-10-11T23:51:50Z",
+      "links": {
+        "web": {
+          "href": "https://www.espn.com/nfl/story/_/id/50161673/nfl-week-5-trolls"
+        }
+      },
+      "categories": []
+    },
+    {
+      "id": 40699880,
+      "headline": "Fantasy football buzz: What's the impact of MHJ trade on Texans and Cardinals?",
+      "published": "2026-10-12T03:49:15Z",
+      "lastModified": "2026-10-12T03:49:15Z",
+      "links": {
+        "web": {
+          "href": "https://www.espn.com/fantasy/football/story/_/id/40699880/fantasy-football-injuries-position-battles-nfl-news-analysis"
+        }
+      },
+      "categories": [
+        {
+          "type": "athlete",
+          "description": "Jalen Hurts"
+        },
+        {
+          "type": "athlete",
+          "description": "Saquon Barkley"
+        },
+        {
+          "type": "athlete",
+          "description": "Lane Johnson"
+        },
+        {
+          "type": "athlete",
+          "description": "DeVonta Smith"
+        },
+        {
+          "type": "athlete",
+          "description": "Bryce Young"
+        },
+        {
+          "type": "athlete",
+          "description": "Colston Loveland"
+        },
+        {
+          "type": "athlete",
+          "description": "Christian McCaffrey"
+        },
+        {
+          "type": "athlete",
+          "description": "Trevor Lawrence"
+        },
+        {
+          "type": "athlete",
+          "description": "Courtland Sutton"
+        },
+        {
+          "type": "athlete",
+          "description": "Jaylen Waddle"
+        },
+        {
+          "type": "athlete",
+          "description": "Bo Nix"
+        },
+        {
+          "type": "athlete",
+          "description": "JK Dobbins"
+        },
+        {
+          "type": "athlete",
+          "description": "RJ Harvey"
+        },
+        {
+          "type": "athlete",
+          "description": "Bucky Irving"
+        },
+        {
+          "type": "athlete",
+          "description": "Dak Prescott"
+        },
+        {
+          "type": "athlete",
+          "description": "George Pickens"
+        },
+        {
+          "type": "athlete",
+          "description": "Ryan Flournoy"
+        },
+        {
+          "type": "athlete",
+          "description": "CeeDee Lamb"
+        },
+        {
+          "type": "athlete",
+          "description": "D'Andre Swift"
+        },
+        {
+          "type": "athlete",
+          "description": "Kyle Monangai"
+        },
+        {
+          "type": "athlete",
+          "description": "Roschon Johnson"
+        },
+        {
+          "type": "athlete",
+          "description": "Tee Higgins"
+        },
+        {
+          "type": "athlete",
+          "description": "Ja'Marr Chase"
+        },
+        {
+          "type": "athlete",
+          "description": "Marvin Harrison Jr"
+        },
+        {
+          "type": "athlete",
+          "description": "CJ Stroud"
+        },
+        {
+          "type": "athlete",
+          "description": "Michael Wilson"
+        },
+        {
+          "type": "athlete",
+          "description": "Trey McBride"
+        }
+      ]
+    },
+    {
+      "id": 50162296,
+      "headline": "Broncos keep Chargers winless with key stop that fuels 4th-quarter rally in 23-17 win",
+      "published": "2026-10-12T01:05:27Z",
+      "lastModified": "2026-10-12T01:05:27Z",
+      "links": {
+        "web": {
+          "href": "http://www.espn.com/nfl/recap?gameId=401872989"
+        }
+      },
+      "categories": []
+    },
+    {
+      "id": 50116111,
+      "headline": "Fantasy football Week 5 inactives: Lamar Jackson out; Zay Flowers active",
+      "published": "2026-10-12T00:20:10Z",
+      "lastModified": "2026-10-12T00:20:10Z",
+      "links": {
+        "web": {
+          "href": "https://www.espn.com/fantasy/football/story/_/page/FFSundayInactives-50116111/fantasy-football-injuries-nfl-week-5-inactive-active"
+        }
+      },
+      "categories": []
+    },
+    {
+      "id": 50162242,
+      "headline": "Commanders' Daniels takes blame for botched final play in OT",
+      "published": "2026-10-12T01:22:41Z",
+      "lastModified": "2026-10-12T01:22:41Z",
+      "links": {
+        "web": {
+          "href": "https://www.espn.com/nfl/story/_/id/50162242/commanders-daniels-takes-blame-botched-final-play-ot"
+        }
+      },
+      "categories": [
+        {
+          "type": "athlete",
+          "description": "Jayden Daniels"
+        },
+        {
+          "type": "athlete",
+          "description": "Cam Skattebo"
+        }
+      ]
+    },
+    {
+      "id": 50162240,
+      "headline": "Jared Goff, Jahmyr Gibbs lead the Lions' offensive romp in a 45-21 win over the Cardinals",
+      "published": "2026-10-12T01:08:28Z",
+      "lastModified": "2026-10-12T01:08:28Z",
+      "links": {
+        "web": {
+          "href": "http://www.espn.com/nfl/recap?gameId=401872991"
+        }
+      },
+      "categories": []
+    },
+    {
+      "id": 50162237,
+      "headline": "Why Jaylen Warren's stock is in on the rise in fantasy",
+      "published": "2026-10-11T23:35:03Z",
+      "lastModified": "2026-10-11T23:35:03Z",
+      "links": {
+        "web": {
+          "href": "https://www.espn.com/video/clip/_/id/50162237/why-jaylen-warren-stock-the-rise-fantasy"
+        }
+      },
+      "categories": [
+        {
+          "type": "athlete",
+          "description": "Jaylen Warren"
+        }
+      ]
+    },
+    {
+      "id": 50162176,
+      "headline": "Denver Broncos vs. Los Angeles Chargers: Game Highlights",
+      "published": "2026-10-11T23:30:40Z",
+      "lastModified": "2026-10-11T23:30:40Z",
+      "links": {
+        "web": {
+          "href": "https://www.espn.com/video/clip/_/id/50162176/game-highlights"
+        }
+      },
+      "categories": [
+        {
+          "type": "athlete",
+          "description": "Ja'Quan McMillian"
+        },
+        {
+          "type": "athlete",
+          "description": "Kimani Vidal"
+        },
+        {
+          "type": "athlete",
+          "description": "Justin Herbert"
+        },
+        {
+          "type": "athlete",
+          "description": "JK Dobbins"
+        },
+        {
+          "type": "athlete",
+          "description": "Bo Nix"
+        }
+      ]
+    },
+    {
+      "id": 50162150,
+      "headline": "David Bailey delivers breakthrough performance in Jets' win",
+      "published": "2026-10-12T00:03:36Z",
+      "lastModified": "2026-10-12T00:03:36Z",
+      "links": {
+        "web": {
+          "href": "https://www.espn.com/nfl/story/_/id/50162150/david-bailey-delivers-breakthrough-performance-jets-win"
+        }
+      },
+      "categories": [
+        {
+          "type": "athlete",
+          "description": "David Bailey"
+        }
+      ]
+    },
+    {
+      "id": 50162146,
+      "headline": "Packers maul Bears, then fire back at Burden for 'quit' talk",
+      "published": "2026-10-12T01:29:59Z",
+      "lastModified": "2026-10-12T01:29:59Z",
+      "links": {
+        "web": {
+          "href": "https://www.espn.com/nfl/story/_/id/50162146/packers-maul-bears-fire-back-burden-quit-talk"
+        }
+      },
+      "categories": [
+        {
+          "type": "athlete",
+          "description": "Luther Burden III"
+        },
+        {
+          "type": "athlete",
+          "description": "Zaire Franklin"
+        }
+      ]
+    },
+    {
+      "id": 50161984,
+      "headline": "49ers lose WR Deebo Samuel to hamstring injury vs. Seahawks",
+      "published": "2026-10-12T01:31:59Z",
+      "lastModified": "2026-10-12T01:31:59Z",
+      "links": {
+        "web": {
+          "href": "https://www.espn.com/nfl/story/_/id/50161984/49ers-lose-wr-deebo-samuel-hamstring-injury-vs-seahawks"
+        }
+      },
+      "categories": [
+        {
+          "type": "athlete",
+          "description": "Deebo Samuel Sr"
+        }
+      ]
+    },
+    {
+      "id": 50161844,
+      "headline": "C.J. Stroud excited for 'dynamic playmaker' Marvin Harrison Jr. to join Texans",
+      "published": "2026-10-11T23:13:35Z",
+      "lastModified": "2026-10-11T23:13:35Z",
+      "links": {
+        "web": {
+          "href": "https://www.espn.com/video/clip/_/id/50161844/cj-stroud-excited-dynamic-playmaker-marvin-harrison-jr-join-texans"
+        }
+      },
+      "categories": [
+        {
+          "type": "athlete",
+          "description": "CJ Stroud"
+        },
+        {
+          "type": "athlete",
+          "description": "Marvin Harrison Jr"
+        }
+      ]
+    },
+    {
+      "id": 50135612,
+      "headline": "NFL Week 5 arrivals: Ravens trio channels early 2000s style ahead of 'SNF'",
+      "published": "2026-10-11T23:12:50Z",
+      "lastModified": "2026-10-11T23:12:50Z",
+      "links": {
+        "web": {
+          "href": "https://www.espn.com/nfl/story/_/id/50135612/nfl-week-5-fashionable-arrivals"
+        }
+      },
+      "categories": []
+    },
+    {
+      "id": 50043976,
+      "headline": "Tracking Jaguars CB/WR Travis Hunter's 2026 season: How did he do vs. Eagles?",
+      "published": "2026-10-11T23:00:55Z",
+      "lastModified": "2026-10-11T23:00:55Z",
+      "links": {
+        "web": {
+          "href": "https://www.espn.com/nfl/story/_/id/50043976/jacksonville-jaguars-travis-hunter-stats-snaps-tracker"
+        }
+      },
+      "categories": [
+        {
+          "type": "athlete",
+          "description": "Travis Hunter"
+        }
+      ]
+    },
+    {
+      "id": 50161771,
+      "headline": "Bears QB Caleb Williams 'close' to returning, Ben Johnson says",
+      "published": "2026-10-11T23:41:23Z",
+      "lastModified": "2026-10-11T23:41:23Z",
+      "links": {
+        "web": {
+          "href": "https://www.espn.com/nfl/story/_/id/50161771/bears-qb-caleb-williams-close-returning-ben-johnson-says"
+        }
+      },
+      "categories": [
+        {
+          "type": "athlete",
+          "description": "Caleb Williams"
+        },
+        {
+          "type": "athlete",
+          "description": "Tyson Bagent"
+        },
+        {
+          "type": "athlete",
+          "description": "Case Keenum"
+        }
+      ]
+    },
+    {
+      "id": 50161627,
+      "headline": "Kyler Murray's vintage performance leads Vikings past Saints",
+      "published": "2026-10-11T23:10:08Z",
+      "lastModified": "2026-10-11T23:10:08Z",
+      "links": {
+        "web": {
+          "href": "https://www.espn.com/nfl/story/_/id/50161627/kyler-murray-vintage-performance-leads-vikings-saints"
+        }
+      },
+      "categories": [
+        {
+          "type": "athlete",
+          "description": "Kyler Murray"
+        }
+      ]
+    },
+    {
+      "id": 50161581,
+      "headline": "Raiders' Fernando Mendoza makes NFL debut late in loss to Pats",
+      "published": "2026-10-11T23:09:05Z",
+      "lastModified": "2026-10-11T23:09:05Z",
+      "links": {
+        "web": {
+          "href": "https://www.espn.com/nfl/story/_/id/50161581/raiders-qb-fernando-mendoza-makes-nfl-regular-season-debut-late-loss-patriots"
+        }
+      },
+      "categories": [
+        {
+          "type": "athlete",
+          "description": "Fernando Mendoza"
+        }
+      ]
+    },
+    {
+      "id": 50161573,
+      "headline": "Is Joe Burrow back to his best after fantasy Week 5?",
+      "published": "2026-10-12T02:04:41Z",
+      "lastModified": "2026-10-12T02:04:41Z",
+      "links": {
+        "web": {
+          "href": "https://www.espn.com/video/clip/_/id/50161573/is-joe-burrow-back-best-fantasy-week-5"
+        }
+      },
+      "categories": [
+        {
+          "type": "athlete",
+          "description": "Joe Burrow"
+        }
+      ]
+    },
+    {
+      "id": 50148192,
+      "headline": "What does trading for the Cardinals' Marvin Harrison Jr. mean for the Texans?",
+      "published": "2026-10-11T23:04:26Z",
+      "lastModified": "2026-10-11T23:04:26Z",
+      "links": {
+        "web": {
+          "href": "https://www.espn.com/nfl/story/_/id/50148192/why-marvin-harrison-trade-texans-cardinals"
+        }
+      },
+      "categories": [
+        {
+          "type": "athlete",
+          "description": "Marvin Harrison Jr"
+        },
+        {
+          "type": "athlete",
+          "description": "CJ Stroud"
+        }
+      ]
+    },
+    {
+      "id": 49907062,
+      "headline": "Aaron Rodgers' 2026 NFL season: Tracking records, milestones",
+      "published": "2026-10-11T22:34:31Z",
+      "lastModified": "2026-10-11T22:34:31Z",
+      "links": {
+        "web": {
+          "href": "https://www.espn.com/nfl/story/_/id/49907062/aaron-rodgers-2026-nfl-season-steelers-packers-jets-tracking-records-milestones"
+        }
+      },
+      "categories": [
+        {
+          "type": "athlete",
+          "description": "Aaron Rodgers"
+        }
+      ]
+    },
+    {
+      "id": 50043542,
+      "headline": "NFL trade deadline grades: Marvin Harrison Jr. to Texans; Cam Jurgens to Ravens",
+      "published": "2026-10-11T23:51:25Z",
+      "lastModified": "2026-10-11T23:51:25Z",
+      "links": {
+        "web": {
+          "href": "https://www.espn.com/nfl/story/_/id/50043542/2026-trade-deadline-grades-latest-best-worst-deals"
+        }
+      },
+      "categories": [
+        {
+          "type": "athlete",
+          "description": "JJ McCarthy"
+        },
+        {
+          "type": "athlete",
+          "description": "Joey Porter Jr"
+        },
+        {
+          "type": "athlete",
+          "description": "Cam Jurgens"
+        },
+        {
+          "type": "athlete",
+          "description": "Marvin Harrison Jr"
+        }
+      ]
+    },
+    {
+      "id": 50161431,
+      "headline": "49ers' Dre Greenlaw ejected after head-butt in Seahawks game",
+      "published": "2026-10-12T03:26:49Z",
+      "lastModified": "2026-10-12T03:26:49Z",
+      "links": {
+        "web": {
+          "href": "https://www.espn.com/nfl/story/_/id/50161431/49ers-dre-greenlaw-ejected-headbutt-seahawks-game"
+        }
+      },
+      "categories": [
+        {
+          "type": "athlete",
+          "description": "Dre Greenlaw"
+        }
+      ]
+    },
+    {
+      "id": 50161430,
+      "headline": "Why Christian Watson is a fantasy must-start",
+      "published": "2026-10-11T22:02:44Z",
+      "lastModified": "2026-10-11T22:02:44Z",
+      "links": {
+        "web": {
+          "href": "https://www.espn.com/video/clip/_/id/50161430/why-christian-watson-fantasy-start"
+        }
+      },
+      "categories": [
+        {
+          "type": "athlete",
+          "description": "Christian Watson"
+        }
+      ]
+    },
+    {
+      "id": 50161332,
+      "headline": "Should Isaiah Likely be a regular starter in fantasy?",
+      "published": "2026-10-11T21:52:06Z",
+      "lastModified": "2026-10-11T21:52:06Z",
+      "links": {
+        "web": {
+          "href": "https://www.espn.com/video/clip/_/id/50161332/should-isaiah-likely-regular-starter-fantasy"
+        }
+      },
+      "categories": [
+        {
+          "type": "athlete",
+          "description": "Isaiah Likely"
+        }
+      ]
+    },
+    {
+      "id": 50161268,
+      "headline": "Is Drake Maye back as a fantasy starter?",
+      "published": "2026-10-11T21:46:43Z",
+      "lastModified": "2026-10-11T21:46:43Z",
+      "links": {
+        "web": {
+          "href": "https://www.espn.com/video/clip/_/id/50161268/is-drake-maye-back-fantasy-starter"
+        }
+      },
+      "categories": [
+        {
+          "type": "athlete",
+          "description": "Drake Maye"
+        }
+      ]
+    },
+    {
+      "id": 50161266,
+      "headline": "Why Jayden Daniels is a consistent fantasy starter",
+      "published": "2026-10-11T21:45:23Z",
+      "lastModified": "2026-10-11T21:45:23Z",
+      "links": {
+        "web": {
+          "href": "https://www.espn.com/video/clip/_/id/50161266/why-jayden-daniels-consistent-fantasy-starter"
+        }
+      },
+      "categories": [
+        {
+          "type": "athlete",
+          "description": "Jayden Daniels"
+        }
+      ]
+    },
+    {
+      "id": 50161113,
+      "headline": "Chicago Bears vs. Green Bay Packers Game Highlights",
+      "published": "2026-10-12T00:18:50Z",
+      "lastModified": "2026-10-12T00:18:50Z",
+      "links": {
+        "web": {
+          "href": "https://www.espn.com/video/clip/_/id/50161113/chicago-bears-vs-green-bay-packers-game-highlights"
+        }
+      },
+      "categories": []
+    },
+    {
+      "id": 50159579,
+      "headline": "What are the best quotes from NFL Week 5? Lawrence, Murray lead the way",
+      "published": "2026-10-11T23:20:07Z",
+      "lastModified": "2026-10-11T23:20:07Z",
+      "links": {
+        "web": {
+          "href": "https://www.espn.com/nfl/story/_/id/50159579/nfl-week-5-top-quotes"
+        }
+      },
+      "categories": [
+        {
+          "type": "athlete",
+          "description": "Cam Little"
+        },
+        {
+          "type": "athlete",
+          "description": "Trevor Lawrence"
+        },
+        {
+          "type": "athlete",
+          "description": "Kyler Murray"
+        },
+        {
+          "type": "athlete",
+          "description": "Justin Jefferson"
+        }
+      ]
+    },
+    {
+      "id": 50161024,
+      "headline": "Titans' Robert Saleh after loss: Cam Ward is our QB1",
+      "published": "2026-10-11T22:32:13Z",
+      "lastModified": "2026-10-11T22:32:13Z",
+      "links": {
+        "web": {
+          "href": "https://www.espn.com/nfl/story/_/id/50161024/titans-robert-saleh-loss-cam-ward-our-qb1"
+        }
+      },
+      "categories": [
+        {
+          "type": "athlete",
+          "description": "Cam Ward"
+        }
+      ]
+    },
+    {
+      "id": 50160890,
+      "headline": "Cleveland Browns vs. New York Jets Game Highlights",
+      "published": "2026-10-11T21:14:16Z",
+      "lastModified": "2026-10-11T21:14:16Z",
+      "links": {
+        "web": {
+          "href": "https://www.espn.com/video/clip/_/id/50160890/cleveland-browns-vs-new-york-jets-game-highlights"
+        }
+      },
+      "categories": [
+        {
+          "type": "athlete",
+          "description": "Garrett Wilson"
+        },
+        {
+          "type": "athlete",
+          "description": "Will McDonald IV"
+        },
+        {
+          "type": "athlete",
+          "description": "Corey Bojorquez"
+        },
+        {
+          "type": "athlete",
+          "description": "Braelon Allen"
+        },
+        {
+          "type": "athlete",
+          "description": "Deshaun Watson"
+        }
+      ]
+    }
+  ]
+}

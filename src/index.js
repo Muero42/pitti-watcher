@@ -1338,7 +1338,15 @@ async function promotePlayerStateRun(env, sweep) {
         )
     `).bind(finishedAt,Number(sweep.seen_count),runId,candidateCount),
     env.DB.prepare(`DELETE FROM player_state_candidates WHERE run_id=?1`).bind(runId),
-    env.DB.prepare(`DELETE FROM player_state_scope_frames WHERE run_id=?1`).bind(runId)
+    // Keep the accepted complete directory, including unchanged players. Remove
+    // at most one superseded five-scope snapshot in the same acceptance batch.
+    env.DB.prepare(`DELETE FROM player_state_scope_frames WHERE (run_id,source_scope) IN (
+      SELECT f.run_id,f.source_scope FROM player_state_scope_frames f
+      WHERE f.run_id < ?1 AND EXISTS (
+        SELECT 1 FROM watcher_runs r WHERE r.id=f.run_id AND r.ok=1 AND r.finished_at IS NOT NULL
+      ) AND EXISTS (SELECT 1 FROM watcher_runs WHERE id=?1 AND ok=1 AND finished_at IS NOT NULL)
+      ORDER BY f.run_id,f.source_scope LIMIT 5
+    )`).bind(runId)
   ];
   const results = await runPhase(env, 'player_state', 'promotion.commit', context,
     () => env.DB.batch(statements));
