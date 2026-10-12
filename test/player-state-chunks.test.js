@@ -164,7 +164,9 @@ function fixture(t,{count=95,changedCount=count,failCheckpointOnce=false,failPro
             if(candidate.run_id===stmt.args[0]&&(stmt.args.length<2||candidate.source_scope===stmt.args[1]))candidates.delete(key);
           }
         }else if(stmt.sql.startsWith('DELETE FROM player_state_scope_frames')){
-          for(const [key,frame] of frames)if(frame.run_id===stmt.args[0])frames.delete(key);
+          if(stmt.sql.includes('LIMIT 5')){
+            let removed=0;for(const [key,frame] of frames){if(removed<5&&frame.run_id<stmt.args[0]&&runs.some(r=>r.id===frame.run_id&&r.ok===1&&r.finished_at!=null)){frames.delete(key);removed++;}}
+          }else for(const [key,frame] of frames)if(frame.run_id===stmt.args[0])frames.delete(key);
         }else if(stmt.sql.startsWith('UPDATE player_state_sweeps')&&stmt.sql.includes('SET scope_offset=0')){
           const sweep=sweeps.get(stmt.args[0]);
           if(sweep&&sweep.next_index===stmt.args[1]&&sweep.scope_offset===stmt.args[2]&&sweep.revalidated_at==null){
@@ -416,7 +418,7 @@ for(const count of [0,41])test(`scheduled start, continuation and promotion pres
   const {query_count,rows_read,rows_written,sql_ms}=loadLogs[0];
   assert.deepEqual({query_count,rows_read,rows_written,sql_ms},{query_count:1,rows_read:count,rows_written:0,sql_ms:1.25});
   assert.equal(f.candidates.size,0);
-  assert.equal(f.frames.size,0);
+  assert.equal(f.frames.size,5,'latest accepted complete snapshot is retained');
 
   const ledgerFinishes=f.calls.ledger.filter(row=>row.sql.startsWith('UPDATE'));
   assert.ok(ledgerFinishes.length>1,'continuations each have a finish');

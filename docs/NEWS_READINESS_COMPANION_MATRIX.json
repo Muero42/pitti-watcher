@@ -1,0 +1,106 @@
+{
+  "schema": "pitti.news-readiness-matrix.v1",
+  "companionHead": "670e0745a72e9b1acf38d2151928f0e73f7d1e7b",
+  "companionTree": "637854eb4dac4f7206387e80ea9c72a859675bea",
+  "rollbackFloor": "c4ca793288d728f84f92e0319d18e9bb4f1373a0",
+  "forbiddenRollback": "f65cfa891ba2cb64999bfa1fc7855bea8024778a",
+  "watcherBase": "38e4c4ede061644b0e879f408bf6a489a9fe6511",
+  "cases": [
+    {
+      "name": "new Companion + old Watcher",
+      "result": "PASS"
+    },
+    {
+      "name": "new Companion + new Watcher disabled",
+      "result": "PASS"
+    },
+    {
+      "name": "old Companion + new Watcher disabled",
+      "result": "PASS"
+    },
+    {
+      "name": "collected D1 article reaches new Companion as visible, unverified review hint",
+      "result": "PASS"
+    },
+    {
+      "name": "repeat feed is idempotent",
+      "result": "PASS"
+    },
+    {
+      "name": "source disabled after News rows exist",
+      "result": "PASS"
+    },
+    {
+      "name": "Watcher code rollback after News rows exist",
+      "result": "PASS"
+    },
+    {
+      "name": "authorized Companion rollback floor rc4.233 preserves cached News protection",
+      "result": "PASS"
+    },
+    {
+      "name": "negative control: old Main rollback is correctly forbidden",
+      "result": "PASS",
+      "actual": "UNSAFE_ACTIONABLE_NEWS",
+      "allowed": false
+    },
+    {
+      "name": "no news fails closed and preserves history",
+      "result": "PASS"
+    },
+    {
+      "name": "unsupported news schema fails closed and preserves history",
+      "result": "PASS"
+    },
+    {
+      "name": "stale lane fails closed and preserves history",
+      "result": "PASS"
+    },
+    {
+      "name": "stale article fails closed and preserves history",
+      "result": "PASS"
+    },
+    {
+      "name": "partial payload fails closed and preserves history",
+      "result": "PASS"
+    },
+    {
+      "name": "unsupported top-level feed preserves history",
+      "result": "PASS"
+    },
+    {
+      "name": "all rollback/feed reads preserve D1 history",
+      "result": "PASS"
+    },
+    {
+      "name": "open-page foreground timer automatically renders News without click",
+      "result": "PASS",
+      "browser": "Chromium",
+      "scope": "actual timer, persistence and feed code; isolated DOM, not complete app rendering",
+      "requests": 2
+    },
+    {
+      "name": "complete Companion app: News automatically visible in open Live / News view",
+      "result": "PASS",
+      "browser": "Chromium",
+      "requests": 2,
+      "applicationBytes": "670e0745a72e9b1acf38d2151928f0e73f7d1e7b",
+      "visible": "Nachrichten PASS: 1 neue Prüfhinweise",
+      "limits": "Visible count; no article card, recommendation or cross-tab notification is claimed. Unrelated providers fail closed in fixtures."
+    }
+  ],
+  "limitations": [
+    "Synthetic article; not historical Harrison evidence.",
+    "Local D1/workerd and headless Chromium only; no Production or physical Android acceptance.",
+    "Old Companion rollback with cached news is intentionally rejected, not repaired.",
+    "No closed-app push; source activation remains separately gated."
+  ],
+  "watcherRuntimeBlobs": {
+    "src/index.js": "9478274cb73015569ee8aa1d4b55289695937a2c",
+    "src/index-v027.js": "ad17c76c5e34d51d69677620c9e077bec60da82f",
+    "src/index-v029.js": "c000d4b559830a4a55ceb9c68c718ea5cb51022b",
+    "src/news-source.js": "e7c397d1918c822ffe85bc8337371fb03e43a1a6"
+  },
+  "verdict": "PASS_WITH_RESTRICTED_ROLLBACK",
+  "publicationScope": "Companion first; Watcher second with News disabled. No publication executed."
+}

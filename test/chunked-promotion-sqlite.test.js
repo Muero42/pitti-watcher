@@ -82,7 +82,7 @@ test('active migrations and preview outbox accept the atomic set-based promotion
   assert.equal(db.prepare('SELECT COUNT(*) count FROM evidence_events WHERE observation_run_id=1').get().count,1);
   assert.equal(db.prepare('SELECT COUNT(*) count FROM alert_outbox').get().count,1);
   assert.equal(db.prepare('SELECT COUNT(*) count FROM player_state_candidates WHERE run_id=1').get().count,0);
-  assert.equal(db.prepare('SELECT COUNT(*) count FROM player_state_scope_frames WHERE run_id=1').get().count,0);
+  assert.equal(db.prepare('SELECT COUNT(*) count FROM player_state_scope_frames WHERE run_id=1').get().count,1,'accepted snapshot remains available to News');
 
   db.prepare(`INSERT INTO watcher_runs(id,run_type,started_at) VALUES(2,'player_state:scheduled',?1)`).run(at+1);
   db.prepare(`
